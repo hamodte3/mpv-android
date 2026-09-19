@@ -1,0 +1,21 @@
+- name: Setup and Download Dependencies
+        run: |
+          set -euo pipefail
+          cd buildscripts
+          chmod +x buildall.sh include/*.sh
+
+          # 1. استخدام SDK و NDK الجاهزين في سيرفر غيت هاب بدون تحميل خارجي
+          mkdir -p sdk
+          ln -sfn "$ANDROID_SDK_ROOT" sdk/android-sdk-linux
+          
+          # ربط أحدث NDK موجود بالسيرفر داخل مجلد sdk
+          DEFAULT_NDK=$(ls -d $ANDROID_SDK_ROOT/ndk/* | sort -V | tail -n 1)
+          ln -sfn "$DEFAULT_NDK" sdk/android-ndk
+
+          # 2. تحميل كود MPV المصدري
+          mkdir -p deps/mpv
+          wget -qO- https://github.com/mpv-player/mpv/archive/master.tar.gz | tar -xz -C deps/mpv --strip-components=1
+
+          # 3. تحميل الاعتماديات الصافية فقط
+          export IN_CI=1
+          ./include/download-deps.sh
