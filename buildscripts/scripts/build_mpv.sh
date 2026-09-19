@@ -47,6 +47,7 @@ MESON_ARGS=(
   "--default-library=shared"
   "-Doptimization=s"
   "-Db_lto=true"
+  "-Dlibass=disabled"
   "-Dcplayer=false"
   "-Degl-android=enabled"
   "-Dlcms2=disabled"
