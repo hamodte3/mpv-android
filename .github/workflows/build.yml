@@ -257,7 +257,8 @@ jobs:
             --buildtype=release \
             --default-library=static \
             -Db_staticpic=true \
-            -Dauto_features=disabled
+            -Dauto_features=disabled \
+            -Drequire-system-font-provider=false
           ninja -C "build/libass" -j$(nproc) install
 
           # 6. بناء libplacebo
