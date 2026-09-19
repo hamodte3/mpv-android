@@ -92,22 +92,32 @@ jobs:
             git clone --depth 1 --recursive https://code.videolan.org/videolan/libplacebo.git libplacebo
           fi
 
-          if [ ! -d curl ]; then
-            echo "==> Fetching curl..."
-            wget -qO- https://curl.se/download/curl-8.21.0.tar.xz | tar -xJ -C .
-            mv curl-8.21.0 curl
+          if [ ! -d freetype ]; then
+            echo "==> Fetching freetype..."
+            wget -qO- https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz | tar -xJ -C .
+            mv freetype-2.13.3 freetype
           fi
 
-      - name: Compile MPV & FFmpeg Arm64
+          if [ ! -d fribidi ]; then
+            echo "==> Fetching fribidi..."
+            wget -qO- https://github.com/fribidi/fribidi/releases/download/v1.0.16/fribidi-1.0.16.tar.xz | tar -xJ -C .
+            mv fribidi-1.0.16 fribidi
+          fi
+
+          if [ ! -d libass ]; then
+            echo "==> Fetching libass..."
+            wget -qO- https://github.com/libass/libass/releases/download/0.17.3/libass-0.17.3.tar.xz | tar -xJ -C .
+            mv libass-0.17.3 libass
+          fi
+
+      - name: Compile MPV & Dependencies Arm64
         run: |
           set -euo pipefail
           cd buildscripts
 
-          # تنظيف أي بناء سابق
           rm -rf build prefix
           mkdir -p build prefix
 
-          # 1. إعداد ملف الـ Cross Compilation الموحد لـ Clang
           CROSS_FILE="$PWD/build/android_cross.txt"
           NDK_LLVM="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           TARGET="aarch64-linux-android24"
@@ -136,8 +146,8 @@ jobs:
           export EXTRA_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections -fmerge-all-constants"
           export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384"
 
-          # 2. بناء FFmpeg الأدنى (الناجح 100%)
-          echo "==> [1/3] Building Minimal FFmpeg..."
+          # 1. بناء FFmpeg
+          echo "==> [1/6] Building Minimal FFmpeg..."
           cat << 'EOF' > build_minimal_ffmpeg.sh
           #!/usr/bin/env bash
           set -euo pipefail
@@ -199,8 +209,70 @@ jobs:
           EOF
           bash ./build_minimal_ffmpeg.sh
 
-          # 3. بناء libplacebo بسرعة فائقة (Static لتندمج تلقائياً داخل MPV)
-          echo "==> [2/3] Building Minimal libplacebo..."
+          # 2. بناء FreeType
+          echo "==> [2/6] Building FreeType..."
+          meson setup "build/freetype" "deps/freetype" \
+            --cross-file="${CROSS_FILE}" \
+            --prefix="$PWD/prefix" \
+            --buildtype=release \
+            --default-library=static \
+            -Db_staticpic=true \
+            -Dauto_features=disabled \
+            -Dharfbuzz=disabled \
+            -Dbrotli=disabled \
+            -Dbzip2=disabled \
+            -Dpng=disabled \
+            -Dzlib=disabled
+          ninja -C "build/freetype" -j$(nproc) install
+
+          # 3. بناء FriBidi
+          echo "==> [3/6] Building FriBidi..."
+          meson setup "build/fribidi" "deps/fribidi" \
+            --cross-file="${CROSS_FILE}" \
+            --prefix="$PWD/prefix" \
+            --buildtype=release \
+            --default-library=static \
+            -Db_staticpic=true \
+            -Dauto_features=disabled \
+            -Ddocs=false \
+            -Dtests=false
+          ninja -C "build/fribidi" -j$(nproc) install
+
+          # 4. بناء libass
+          echo "==> [4/6] Building libass..."
+          if [ -f "deps/libass/meson.build" ]; then
+            meson setup "build/libass" "deps/libass" \
+              --cross-file="${CROSS_FILE}" \
+              --prefix="$PWD/prefix" \
+              --buildtype=release \
+              --default-library=static \
+              -Db_staticpic=true \
+              -Dauto_features=disabled \
+              -Dfontconfig=disabled \
+              -Dharfbuzz=disabled
+            ninja -C "build/libass" -j$(nproc) install
+          else
+            mkdir -p build/libass
+            cd build/libass
+            ../../deps/libass/configure \
+              --host=aarch64-linux-android \
+              --prefix="$PWD/../../prefix" \
+              --enable-static \
+              --disable-shared \
+              --disable-fontconfig \
+              --disable-harfbuzz \
+              --disable-require-system-font-provider \
+              CC="${NDK_LLVM}/aarch64-linux-android24-clang" \
+              AR="${NDK_LLVM}/llvm-ar" \
+              RANLIB="${NDK_LLVM}/llvm-ranlib" \
+              PKG_CONFIG_PATH="$PWD/../../prefix/lib/pkgconfig"
+            make -j$(nproc)
+            make install
+            cd ../..
+          fi
+
+          # 5. بناء libplacebo
+          echo "==> [5/6] Building libplacebo..."
           meson setup "build/libplacebo" "deps/libplacebo" \
             --cross-file="${CROSS_FILE}" \
             --prefix="$PWD/prefix" \
@@ -211,8 +283,8 @@ jobs:
             -Ddemos=false
           ninja -C "build/libplacebo" -j$(nproc) install
 
-          # 4. بناء MPV لإنتاج libmpv.so
-          echo "==> [3/3] Building Ultra-Minimal MPV..."
+          # 6. بناء MPV النهائي لإنتاج libmpv.so
+          echo "==> [6/6] Building Ultra-Minimal MPV..."
           MESON_ARGS=(
             "--cross-file=${CROSS_FILE}"
             "--prefix=$PWD/prefix"
@@ -236,7 +308,6 @@ jobs:
         run: |
           mkdir -p dist
 
-          # سحب ملفات SO الناتجة الصافية من prefix فقط
           find buildscripts/prefix/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
           find app/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
 
