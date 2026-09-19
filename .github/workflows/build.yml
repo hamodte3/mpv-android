@@ -76,20 +76,9 @@ jobs:
           mkdir -p deps
           cd deps
 
-          if [ ! -d mbedtls ]; then
-            echo "==> Fetching mbedtls..."
-            wget -qO- https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2 | tar -xj -C .
-            mv mbedtls-3.6.7 mbedtls
-          fi
-
           if [ ! -d ffmpeg ]; then
             echo "==> Cloning ffmpeg..."
             git clone --depth 1 -b n9.0 https://github.com/FFmpeg/FFmpeg ffmpeg
-          fi
-
-          if [ ! -d libplacebo ]; then
-            echo "==> Cloning libplacebo..."
-            git clone --depth 1 --recursive https://code.videolan.org/videolan/libplacebo.git libplacebo
           fi
 
           if [ ! -d freetype ]; then
@@ -104,10 +93,20 @@ jobs:
             mv fribidi-1.0.16 fribidi
           fi
 
+          if [ ! -d harfbuzz ]; then
+            echo "==> Cloning harfbuzz..."
+            git clone --depth 1 -b 9.0.0 https://github.com/harfbuzz/harfbuzz.git harfbuzz
+          fi
+
           if [ ! -d libass ]; then
             echo "==> Fetching libass..."
             wget -qO- https://github.com/libass/libass/releases/download/0.17.3/libass-0.17.3.tar.xz | tar -xJ -C .
             mv libass-0.17.3 libass
+          fi
+
+          if [ ! -d libplacebo ]; then
+            echo "==> Cloning libplacebo..."
+            git clone --depth 1 --recursive https://code.videolan.org/videolan/libplacebo.git libplacebo
           fi
 
       - name: Compile MPV & Dependencies Arm64
@@ -138,7 +137,7 @@ jobs:
 
           [built-in options]
           c_args = ['-Os', '-flto', '-fvisibility=hidden', '-I$PWD/prefix/include']
-          c_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=all', '-L$PWD/prefix/lib']
+          c_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=all', '-L$PWD/prefix/lib', '-static-libstdc++']
           CROSS_EOF
 
           export PKG_CONFIG_PATH="$PWD/prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
@@ -147,7 +146,7 @@ jobs:
           export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384"
 
           # 1. بناء FFmpeg
-          echo "==> [1/6] Building Minimal FFmpeg..."
+          echo "==> [1/7] Building Minimal FFmpeg..."
           cat << 'EOF' > build_minimal_ffmpeg.sh
           #!/usr/bin/env bash
           set -euo pipefail
@@ -210,7 +209,7 @@ jobs:
           bash ./build_minimal_ffmpeg.sh
 
           # 2. بناء FreeType
-          echo "==> [2/6] Building FreeType..."
+          echo "==> [2/7] Building FreeType..."
           meson setup "build/freetype" "deps/freetype" \
             --cross-file="${CROSS_FILE}" \
             --prefix="$PWD/prefix" \
@@ -226,7 +225,7 @@ jobs:
           ninja -C "build/freetype" -j$(nproc) install
 
           # 3. بناء FriBidi
-          echo "==> [3/6] Building FriBidi..."
+          echo "==> [3/7] Building FriBidi..."
           meson setup "build/fribidi" "deps/fribidi" \
             --cross-file="${CROSS_FILE}" \
             --prefix="$PWD/prefix" \
@@ -238,38 +237,31 @@ jobs:
             -Dtests=false
           ninja -C "build/fribidi" -j$(nproc) install
 
-          # 4. بناء libass
-          echo "==> [4/6] Building libass..."
-          if [ -f "deps/libass/meson.build" ]; then
-            meson setup "build/libass" "deps/libass" \
-              --cross-file="${CROSS_FILE}" \
-              --prefix="$PWD/prefix" \
-              --buildtype=release \
-              --default-library=static \
-              -Db_staticpic=true \
-              -Dauto_features=disabled
-            ninja -C "build/libass" -j$(nproc) install
-          else
-            mkdir -p build/libass
-            cd build/libass
-            ../../deps/libass/configure \
-              --host=aarch64-linux-android \
-              --prefix="$PWD/../../prefix" \
-              --enable-static \
-              --disable-shared \
-              --disable-fontconfig \
-              --disable-require-system-font-provider \
-              CC="${NDK_LLVM}/aarch64-linux-android24-clang" \
-              AR="${NDK_LLVM}/llvm-ar" \
-              RANLIB="${NDK_LLVM}/llvm-ranlib" \
-              PKG_CONFIG_PATH="$PWD/../../prefix/lib/pkgconfig"
-            make -j$(nproc)
-            make install
-            cd ../..
-          fi
+          # 4. بناء HarfBuzz الصافي
+          echo "==> [4/7] Building HarfBuzz..."
+          meson setup "build/harfbuzz" "deps/harfbuzz" \
+            --cross-file="${CROSS_FILE}" \
+            --prefix="$PWD/prefix" \
+            --buildtype=release \
+            --default-library=static \
+            -Db_staticpic=true \
+            -Dauto_features=disabled \
+            -Dtests=disabled
+          ninja -C "build/harfbuzz" -j$(nproc) install
 
-          # 5. بناء libplacebo
-          echo "==> [5/6] Building libplacebo..."
+          # 5. بناء libass
+          echo "==> [5/7] Building libass..."
+          meson setup "build/libass" "deps/libass" \
+            --cross-file="${CROSS_FILE}" \
+            --prefix="$PWD/prefix" \
+            --buildtype=release \
+            --default-library=static \
+            -Db_staticpic=true \
+            -Dauto_features=disabled
+          ninja -C "build/libass" -j$(nproc) install
+
+          # 6. بناء libplacebo
+          echo "==> [6/7] Building libplacebo..."
           meson setup "build/libplacebo" "deps/libplacebo" \
             --cross-file="${CROSS_FILE}" \
             --prefix="$PWD/prefix" \
@@ -280,8 +272,8 @@ jobs:
             -Ddemos=false
           ninja -C "build/libplacebo" -j$(nproc) install
 
-          # 6. بناء MPV النهائي لإنتاج libmpv.so
-          echo "==> [6/6] Building Ultra-Minimal MPV..."
+          # 7. بناء MPV النهائي لإنتاج libmpv.so
+          echo "==> [7/7] Building Ultra-Minimal MPV..."
           MESON_ARGS=(
             "--cross-file=${CROSS_FILE}"
             "--prefix=$PWD/prefix"
