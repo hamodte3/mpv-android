@@ -4,11 +4,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFIX="${SCRIPT_DIR}/prefix"
 BUILD_DIR="${SCRIPT_DIR}/build/ffmpeg"
+FFMPEG_SRC="${SCRIPT_DIR}/deps/ffmpeg"
 
 mkdir -p "${BUILD_DIR}" "${PREFIX}"
 cd "${BUILD_DIR}"
 
-# إجبار FFmpeg على تصدير واجهاته البرمجية لكي يراها كود التطبيق في thumbnail.cpp
 SAFE_CFLAGS="${EXTRA_CFLAGS:-} -I${PREFIX}/include -fvisibility=default"
 
 FFMPEG_MINIMAL_FLAGS=(
@@ -16,8 +16,12 @@ FFMPEG_MINIMAL_FLAGS=(
   --arch=aarch64
   --cpu=armv8-a
   --enable-cross-compile
-  --cross-prefix=aarch64-linux-android24-
   --cc=aarch64-linux-android24-clang
+  --cxx=aarch64-linux-android24-clang++
+  --ar=llvm-ar
+  --ranlib=llvm-ranlib
+  --nm=llvm-nm
+  --strip=llvm-strip
   --prefix="${PREFIX}"
   --disable-static
   --enable-shared
@@ -46,7 +50,7 @@ FFMPEG_MINIMAL_FLAGS=(
   --enable-protocol=file,http,https,tcp,udp,hls,tls
 )
 
-../../ffmpeg/configure "${FFMPEG_MINIMAL_FLAGS[@]}" \
+"${FFMPEG_SRC}/configure" "${FFMPEG_MINIMAL_FLAGS[@]}" \
   --extra-cflags="${SAFE_CFLAGS}" \
   --extra-ldflags="${EXTRA_LDFLAGS:-} -L${PREFIX}/lib"
 
