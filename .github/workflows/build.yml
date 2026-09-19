@@ -35,7 +35,9 @@ jobs:
             yasm \
             nasm \
             python3 \
-            python3-jinja2
+            python3-jinja2 \
+            wget \
+            unzip
 
       - name: Setup Environment & Toolchain
         run: |
@@ -126,16 +128,18 @@ jobs:
           endian = 'little'
 
           [built-in options]
-          c_args = ['-Os', '-flto', '-I$PWD/prefix/include']
+          c_args = ['-Os', '-flto', '-fvisibility=hidden', '-I$PWD/prefix/include']
           c_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=all', '-L$PWD/prefix/lib', '-static-libstdc++']
+          cpp_args = ['-Os', '-flto', '-fvisibility=hidden', '-I$PWD/prefix/include']
+          cpp_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=all', '-L$PWD/prefix/lib', '-static-libstdc++']
           CROSS_EOF
 
           export PKG_CONFIG_PATH="$PWD/prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
           export PKG_CONFIG_LIBDIR="$PWD/prefix/lib/pkgconfig"
-          export EXTRA_CFLAGS="-Os -flto -ffunction-sections -fdata-sections -fmerge-all-constants"
-          # السماح بتصدير av_jni_set_java_vm لـ libplayer.so
-          export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384"
+          export EXTRA_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections -fmerge-all-constants"
+          export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384"
 
+          # 1. بناء FFmpeg
           cat << 'EOF' > build_minimal_ffmpeg.sh
           #!/usr/bin/env bash
           set -euo pipefail
@@ -165,35 +169,41 @@ jobs:
           EOF
           bash ./build_minimal_ffmpeg.sh
 
+          # 2. بناء FreeType
           meson setup "build/freetype" "deps/freetype" --cross-file="${CROSS_FILE}" --prefix="$PWD/prefix" --buildtype=release --default-library=static -Db_staticpic=true -Dauto_features=disabled -Dharfbuzz=disabled -Dbrotli=disabled -Dbzip2=disabled -Dpng=disabled -Dzlib=disabled
           ninja -C "build/freetype" -j$(nproc) install
 
+          # 3. بناء FriBidi
           meson setup "build/fribidi" "deps/fribidi" --cross-file="${CROSS_FILE}" --prefix="$PWD/prefix" --buildtype=release --default-library=static -Db_staticpic=true -Dauto_features=disabled -Ddocs=false -Dtests=false
           ninja -C "build/fribidi" -j$(nproc) install
 
+          # 4. بناء HarfBuzz
           meson setup "build/harfbuzz" "deps/harfbuzz" --cross-file="${CROSS_FILE}" --prefix="$PWD/prefix" --buildtype=release --default-library=static -Db_staticpic=true -Dauto_features=disabled -Dtests=disabled
           ninja -C "build/harfbuzz" -j$(nproc) install
 
+          # 5. بناء libass
           meson setup "build/libass" "deps/libass" --cross-file="${CROSS_FILE}" --prefix="$PWD/prefix" --buildtype=release --default-library=static -Db_staticpic=true -Dauto_features=disabled -Drequire-system-font-provider=false
           ninja -C "build/libass" -j$(nproc) install
 
+          # 6. بناء libplacebo
           meson setup "build/libplacebo" "deps/libplacebo" --cross-file="${CROSS_FILE}" --prefix="$PWD/prefix" --buildtype=release --default-library=static -Db_staticpic=true -Dauto_features=disabled -Ddemos=false
           ninja -C "build/libplacebo" -j$(nproc) install
 
-          MESON_ARGS=("--cross-file=${CROSS_FILE}" "--prefix=$PWD/prefix" "--buildtype=release" "--default-library=shared" "-Db_lto=true" "-Dauto_features=disabled" "-Dlibmpv=true" "-Dcplayer=false" "-Degl-android=enabled")
+          # 7. بناء MPV مع فرض دمج كامل لرموز C++ الساكنة لعدم طلب to_chars خارجياً
+          MESON_ARGS=(
+            "--cross-file=${CROSS_FILE}"
+            "--prefix=$PWD/prefix"
+            "--buildtype=release"
+            "--default-library=shared"
+            "-Db_lto=true"
+            "-Dauto_features=disabled"
+            "-Dlibmpv=true"
+            "-Dcplayer=false"
+            "-Degl-android=enabled"
+            "-Dc_link_args=['-static-libstdc++', '-Wl,-Bsymbolic', '-Wl,-z,max-page-size=16384']"
+          )
           meson setup "build/mpv" "deps/mpv" "${MESON_ARGS[@]}"
           ninja -C "build/mpv" -j$(nproc) install
-
-          # بناء libplayer.so الأصلي ليتطابق برمجياً مع libmpv
-          if [ -d "../app/src/main/jni" ]; then
-            echo "==> Building matching libplayer.so..."
-            "${NDK_LLVM}/${TARGET}-clang" -fPIC -shared \
-              -I../app/src/main/jni -I"$PWD/prefix/include" \
-              ../app/src/main/jni/*.c* \
-              -L"$PWD/prefix/lib" -lmpv -lavcodec -lavutil \
-              -o "$PWD/prefix/lib/libplayer.so" \
-              -Wl,-s -Wl,-z,max-page-size=16384 || true
-          fi
 
           if command -v llvm-strip &> /dev/null; then
             find prefix/ -name "*.so" -exec llvm-strip --strip-debug --strip-unneeded -R .comment {} + 2>/dev/null || true
@@ -204,9 +214,10 @@ jobs:
           set -euo pipefail
           mkdir -p dist
 
+          # 1. نسخ libmpv ومكتبات FFmpeg
           find buildscripts/prefix/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
-          find app/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
 
+          # 2. جلب وتجريد libc++_shared.so من نفس NDK r30 بالضبط
           LIBCXX_SRC=$(find "${ANDROID_NDK_HOME}" -name "libc++_shared.so" | grep "aarch64-linux-android" | head -n 1)
           cp -v "${LIBCXX_SRC}" dist/
           llvm-strip --strip-unneeded -R .comment dist/libc++_shared.so
