@@ -54,7 +54,7 @@ jobs:
             chmod +x sdk/bin/gas-preprocessor.pl
           fi
 
-          # 3. تثبيت NDK r30 وضبط المسار تلقائياً
+          # 3. تثبيت NDK r30 وضبط المسار
           if [ ! -d "sdk/android-ndk-r30" ]; then
             echo "==> Downloading NDK r30..."
             wget -q --progress=bar:force "http://dl.google.com/android/repository/android-ndk-r30-linux.zip" -O ndk.zip
@@ -103,24 +103,19 @@ jobs:
           cd buildscripts
           chmod +x *.sh 2>/dev/null || true
 
-          echo "==> [1/5] Cleaning old build & prefix artifacts..."
+          echo "==> [1/4] Cleaning old build & prefix artifacts..."
           rm -rf build prefix
 
-          echo "==> [2/5] Setting Global Size & Linker Optimization Flags..."
+          echo "==> [2/4] Setting Global Optimization Flags..."
           export EXTRA_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections -fmerge-all-constants"
-          export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384 $([ -f mpv.map ] && echo "-Wl,--version-script=$PWD/mpv.map")"
+          export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384"
 
-          echo "==> [3/5] Running FFmpeg Minimal Build..."
-          if [ -f "build_minimal_ffmpeg.sh" ]; then
-            bash ./build_minimal_ffmpeg.sh
-          fi
+          echo "==> [3/4] Running FFmpeg Minimal Build..."
+          bash ./build_minimal_ffmpeg.sh
 
-          echo "==> [4/5] Building MPV..."
-          if [ -f "build_mpv.sh" ]; then
-            bash ./build_mpv.sh
-          fi
+          echo "==> [4/4] Building MPV..."
+          bash ./build_mpv.sh
 
-          echo "==> [5/5] Post-Processing: Stripping .comment notes..."
           if command -v llvm-strip &> /dev/null; then
             find prefix/ -name "*.so" -exec llvm-strip --strip-debug --strip-unneeded -R .comment {} + 2>/dev/null || true
           fi
@@ -129,7 +124,7 @@ jobs:
         run: |
           mkdir -p dist
 
-          # سحب ملفات SO الناتجة عن البناء الفعلي فقط (مع استبعاد الـ SDK نهائياً)
+          # سحب ملفات SO الناتجة عن البناء الفعلي فقط من prefix
           find buildscripts/prefix/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
           find app/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
 
