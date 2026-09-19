@@ -2,23 +2,23 @@
         run: |
           set -euo pipefail
           cd buildscripts
-          
+
           # إعطاء صلاحيات التشغيل للسكربتات
           chmod +x buildall.sh include/*.sh
-          
+
           # ربط SDK
           mkdir -p sdk
           ln -sfn "$ANDROID_SDK_ROOT" sdk/android-sdk-linux
-          
+
           # تحميل NDK الخاص بـ mpv-android
           export WGET="wget --progress=bar:force"
           export IN_CI=1
           ./include/download-sdk.sh
-          
+
           # تحميل كود MPV المصدري
           mkdir -p deps/mpv
           wget -qO- https://github.com/mpv-player/mpv/archive/master.tar.gz | tar -xz -C deps/mpv --strip-components=1
-          
+
           # تحميل الاعتماديات المصفاة (بدون الخطوط والترجمة)
           ./include/download-deps.sh
 
@@ -26,12 +26,12 @@
         run: |
           set -euo pipefail
           cd buildscripts
-          
-          # 1. بناء الاعتماديات المتبقية (FFmpeg, libplacebo, mbedtls, curl) لمعمارية arm64 حصراً
+
+          # 1. بناء الاعتماديات المتبقية لمعمارية arm64 حصراً
           ./buildall.sh --only-deps mpv --arch arm64
-          
+
           # 2. بناء مكتبة mpv
           ./buildall.sh -n mpv --arch arm64
-          
-          # 3. تجميع طبقة الـ JNI وإنتاج libplayer.so النهائي
+
+          # 3. تجميع طبقة الـ JNI وإنتاج libplayer.so
           ./buildall.sh -n --arch arm64
