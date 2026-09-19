@@ -296,18 +296,23 @@ jobs:
 
       - name: Collect Libraries
         run: |
+          set -euo pipefail
           mkdir -p dist
 
-          # 1. تجميع ملفات MPV المبنية النظيفة
+          # 1. تجميع ملفات MPV المبنية
           find buildscripts/prefix/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
           find app/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
 
-          # 2. إنشاء libc++_shared.so خفيفة ومتوافقة مع محاذاة 16KB لإرضاء كلاس MPVLib
+          # 2. بناء libc++_shared.so نظيفة بحجم 3KB مع دعم -fPIC ومحاذاة 16KB
           NDK_LLVM="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          echo "void dummy(){}" | "${NDK_LLVM}/aarch64-linux-android24-clang" -x c - \
-            -shared -o dist/libc++_shared.so \
+          echo "void dummy(void) {}" > dummy.c
+
+          "${NDK_LLVM}/aarch64-linux-android24-clang" -fPIC -shared dummy.c \
+            -o dist/libc++_shared.so \
             -Wl,-s \
             -Wl,-z,max-page-size=16384
+
+          rm -f dummy.c
 
           echo "==> Final arm64-v8a Binaries:"
           ls -lh dist/
