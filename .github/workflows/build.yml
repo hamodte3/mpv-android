@@ -1,7 +1,7 @@
-name: Build Stripped Libmpv
+name: Build Ultra-Lean Libmpv (No-Subtitles)
 
 on:
-  workflow_dispatch: # زر تشغيل يدوي
+  workflow_dispatch:
 
 jobs:
   build-mpv:
@@ -15,25 +15,24 @@ jobs:
 
       - name: Setup Android NDK
         run: |
-          # العثور على أحدث NDK مثبت مسبقاً في سيرفر غيت هاب
           NDK_PATH=$(ls -d $ANDROID_SDK_ROOT/ndk/* | sort -V | tail -n 1)
           echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
           echo "NDK_LLVM=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_ENV
           echo "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
 
-      - name: Clone Source Code (FFmpeg & MPV)
+      - name: Clone Source Code
         run: |
           git clone --depth 1 https://github.com/FFmpeg/FFmpeg.git ffmpeg
           git clone --depth 1 https://github.com/mpv-player/mpv.git mpv
 
-      - name: Build Minimal FFmpeg & MPV
+      - name: Compile Ultra-Lean Binaries
         run: |
           set -euo pipefail
           WORKDIR=$(pwd)
           PREFIX="$WORKDIR/prefix"
           mkdir -p "$PREFIX"
 
-          # 1. إنشاء خريطة عزل الرموز
+          # خريطة عزل الرموز التامة
           cat << 'EOF' > mpv.map
           {
               global:
@@ -45,11 +44,11 @@ jobs:
           };
           EOF
 
-          # 2. رايات تحسين الحجم والربط
+          # رايات التحسين القصوى
           export EXTRA_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections -fmerge-all-constants"
           export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384 -Wl,--version-script=$WORKDIR/mpv.map"
 
-          # 3. بناء FFmpeg المخفف
+          # 1. بناء FFmpeg مجرد من كوديكس وموزعات الترجمة
           mkdir -p build_ffmpeg && cd build_ffmpeg
           ../ffmpeg/configure \
             --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
@@ -63,16 +62,15 @@ jobs:
             --enable-jni --enable-mediacodec \
             --disable-hwaccels \
             --enable-hwaccel=h264_mediacodec --enable-hwaccel=hevc_mediacodec --enable-hwaccel=vp9_mediacodec \
-            --enable-decoder=h264,hevc,vp8,vp9,mpeg4,aac,flac,opus,mp3,ac3,eac3,vorbis \
-            --enable-decoder=ass,ssa,subrip,webvtt,mov_text \
-            --enable-demuxer=ass,srt,webvtt,mov,matroska,flv,hls,dash,aac,flac,mp3,ogg,mpegts \
-            --enable-parser=h264,hevc,av1,vp9,aac,mpegaudio,opus,flac,vorbis \
+            --enable-decoder=h264,hevc,vp8,vp9,mpeg4,aac,mp3 \
+            --enable-demuxer=mov,matroska,flv,hls,dash,aac,mp3,mpegts \
+            --enable-parser=h264,hevc,av1,vp9,aac,mpegaudio \
             --enable-protocol=file,http,https,tcp,udp,hls,tls
           make -j$(nproc)
           make install
           cd "$WORKDIR"
 
-          # 4. بناء MPV بـ Meson
+          # 2. ملف الـ Cross compilation لـ Meson
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 
@@ -95,12 +93,14 @@ jobs:
           c_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=all', '-L$PREFIX/lib']
           EOF
 
+          # 3. بناء MPV مع إيقاف libass نهائياً
           meson setup build_mpv mpv \
             --cross-file=android_cross.txt \
             --prefix="$PREFIX" \
             --buildtype=release \
             --default-library=shared \
             -Doptimization=s -Db_lto=true -Dcplayer=false -Degl-android=enabled \
+            -Dlibass=disabled \
             -Dlcms2=disabled -Drubberband=disabled -Dfontconfig=disabled -Dexpat=disabled \
             -Dlua=disabled -Djavascript=disabled -Dlibsmbclient=disabled -Duchardet=disabled \
             -Dcdda=disabled -Ddvbin=disabled -Ddvdnav=disabled -Ddvdread=disabled \
@@ -109,11 +109,11 @@ jobs:
           ninja -C build_mpv -j$(nproc)
           ninja -C build_mpv install
 
-          # 5. تنظيف الرموز
+          # تجريد المقاطع الداخلية والتعليقات
           llvm-strip --strip-debug --strip-unneeded -R .comment "$PREFIX/lib/libmpv.so"
 
-      - name: Upload Clean libmpv.so
+      - name: Upload Ultra-Lean libmpv.so
         uses: actions/upload-artifact@v4
         with:
-          name: libmpv-arm64-v8a-stripped
+          name: libmpv-arm64-ultra-lean
           path: prefix/lib/libmpv.so
