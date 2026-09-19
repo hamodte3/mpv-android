@@ -102,11 +102,11 @@ jobs:
           set -euo pipefail
           cd buildscripts
 
-          # تنظيف البناء السابق
+          # تنظيف أي بناء قديم
           rm -rf build prefix
           mkdir -p build prefix
 
-          # إنشاء سكربت بناء FFmpeg مباشرة داخل المجلد بالمسارات المضبوطة
+          # 1. سكربت بناء FFmpeg الناجح
           cat << 'EOF' > build_minimal_ffmpeg.sh
           #!/usr/bin/env bash
           set -euo pipefail
@@ -168,7 +168,7 @@ jobs:
           make install
           EOF
 
-          # إنشاء سكربت بناء MPV مباشرة داخل المجلد
+          # 2. سكربت بناء MPV المصحح لـ Meson
           cat << 'EOF' > build_mpv.sh
           #!/usr/bin/env bash
           set -euo pipefail
@@ -176,10 +176,12 @@ jobs:
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
           PREFIX="${SCRIPT_DIR}/prefix"
           BUILD_DIR="${SCRIPT_DIR}/build/mpv"
-          CROSS_FILE="${BUILD_DIR}/android_cross.txt"
+          CROSS_FILE="${SCRIPT_DIR}/build/android_cross.txt"
           MPV_SRC="${SCRIPT_DIR}/deps/mpv"
 
-          mkdir -p "${BUILD_DIR}" "${PREFIX}"
+          # تفريغ مجلد البناء لضمان نظافته تماماً لميزون
+          rm -rf "${BUILD_DIR}"
+          mkdir -p "${PREFIX}"
 
           export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
           export PKG_CONFIG_LIBDIR="${PREFIX}/lib/pkgconfig"
@@ -187,6 +189,7 @@ jobs:
           NDK_LLVM="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           TARGET="aarch64-linux-android24"
 
+          # حفظ ملف الـ Cross خارج مجلد mpv حتى لا يعترض ميزون
           cat << CROSS_EOF > "${CROSS_FILE}"
           [binaries]
           c = '${NDK_LLVM}/${TARGET}-clang'
@@ -211,31 +214,15 @@ jobs:
             "--prefix=${PREFIX}"
             "--buildtype=release"
             "--default-library=shared"
-            "-Doptimization=s"
             "-Db_lto=true"
-            "-Dlibass=disabled"
+            "-Dauto_features=disabled"
+            "-Dlibmpv=true"
             "-Dcplayer=false"
             "-Degl-android=enabled"
-            "-Dlcms2=disabled"
-            "-Drubberband=disabled"
-            "-Dfontconfig=disabled"
-            "-Dexpat=disabled"
-            "-Dlua=disabled"
-            "-Djavascript=disabled"
-            "-Dlibsmbclient=disabled"
-            "-Duchardet=disabled"
-            "-Dcdda=disabled"
-            "-Ddvbin=disabled"
-            "-Ddvdnav=disabled"
-            "-Ddvdread=disabled"
-            "-Dmanpage-build=disabled"
-            "-Dhtml-build=disabled"
-            "-Dtests=disabled"
-            "-Ddocs=disabled"
           )
 
           echo "==> Configuring Minimal MPV with Meson..."
-          meson setup "${BUILD_DIR}" "${MPV_SRC}" "${MESON_ARGS[@]}" --wipe || meson setup "${BUILD_DIR}" "${MPV_SRC}" "${MESON_ARGS[@]}"
+          meson setup "${BUILD_DIR}" "${MPV_SRC}" "${MESON_ARGS[@]}"
 
           echo "==> Compiling libmpv with Ninja..."
           ninja -C "${BUILD_DIR}" -j$(nproc)
@@ -266,7 +253,7 @@ jobs:
         run: |
           mkdir -p dist
 
-          # سحب ملفات SO الناتجة عن البناء الفعلي فقط من prefix والمشروع
+          # سحب ملفات SO الناتجة الصافية من prefix فقط
           find buildscripts/prefix/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
           find app/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
 
