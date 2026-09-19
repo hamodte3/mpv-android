@@ -36,25 +36,26 @@ jobs:
             nasm \
             python3
 
-      - name: Setup and Download Dependencies
+      - name: Setup Environment & Toolchain
         run: |
           set -euo pipefail
           RUNNER_SDK="$ANDROID_SDK_ROOT"
           cd buildscripts
-          chmod +x buildall.sh include/*.sh
+          chmod +x *.sh include/*.sh 2>/dev/null || true
+          [ -f buildall ] && chmod +x buildall
 
-          # 1. إعداد مسار SDK
+          # إعداد مجلدات الـ SDK
           mkdir -p sdk
           ln -sfn "$RUNNER_SDK" sdk/android-sdk-linux
 
-          # 2. أداة gas-preprocessor
+          # أداة gas-preprocessor
           mkdir -p sdk/bin
           if [ ! -f sdk/bin/gas-preprocessor.pl ]; then
             wget -q https://github.com/FFmpeg/gas-preprocessor/raw/master/gas-preprocessor.pl -O sdk/bin/gas-preprocessor.pl
             chmod +x sdk/bin/gas-preprocessor.pl
           fi
 
-          # 3. فك NDK r30
+          # تثبيت NDK r30
           if [ ! -d "sdk/android-ndk-r30" ]; then
             echo "==> Downloading NDK r30"
             wget -q --progress=bar:force "http://dl.google.com/android/repository/android-ndk-r30-linux.zip" -O ndk.zip
@@ -62,11 +63,10 @@ jobs:
             rm ndk.zip
           fi
 
-          # 4. سورس MPV
+          # تنزيل سورس mpv والاعتماديات في مسار deps
           mkdir -p deps/mpv
           wget -qO- https://github.com/mpv-player/mpv/archive/master.tar.gz | tar -xz -C deps/mpv --strip-components=1
 
-          # 5. تنزيل الاعتماديات الصافية
           mkdir -p deps
           cd deps
 
@@ -92,31 +92,34 @@ jobs:
             mv curl-8.21.0 curl
           fi
 
-      - name: Build MPV Arm64
+      - name: Compile MPV & FFmpeg Arm64
         run: |
           set -euo pipefail
           cd buildscripts
-          ./buildall.sh --only-deps mpv --arch arm64
-          ./buildall.sh -n mpv --arch arm64
-          ./buildall.sh -n --arch arm64
+          chmod +x buildall* *.sh 2>/dev/null || true
 
-      - name: Collect Output
+          # تشغيل السكربت المباشر سواء كان بامتداد sh أو بدونه ودون وسائط معطلة
+          if [ -f "buildall" ]; then
+            echo "==> Executing ./buildall"
+            bash ./buildall
+          elif [ -f "buildall.sh" ]; then
+            echo "==> Executing ./buildall.sh"
+            bash ./buildall.sh
+          else
+            echo "==> Running sub-scripts directly"
+            bash ./build_minimal_ffmpeg.sh
+            bash ./build_mpv.sh
+          fi
+
+      - name: Collect Libraries
         run: |
           mkdir -p dist
 
-          # سحب جميع ملفات المكتبات المبنية (.so و .a) من مسارات البناء
-          find buildscripts/prefix/arm64/ -type f \( -name "*.so*" -o -name "*.a" \) -exec cp -v {} dist/ \; 2>/dev/null || true
+          # سحب جميع ملفات so من مسار prefix ومجلدات المشروع
+          find buildscripts/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
           find app/ -type f -name "*.so" -exec cp -v {} dist/ \; 2>/dev/null || true
 
-          # سحب ملفات الترويسة الأساسية header إن وجدت
-          mkdir -p dist/include
-          cp -rv buildscripts/prefix/arm64/include/* dist/include/ 2>/dev/null || true
-
-          # ضمان وجود ملف تفريغ حتى لا يفشل الرفع تحت أي ظرف
-          touch dist/build_info.txt
-          echo "MPV arm64-v8a build completed at $(date)" > dist/build_info.txt
-
-          echo "=== Collected Binaries ==="
+          echo "==> Collected Libraries in dist:"
           ls -lh dist/
 
       - name: Upload Binaries
@@ -124,3 +127,4 @@ jobs:
         with:
           name: libmpv-arm64
           path: dist/
+          if-no-files-found: error
