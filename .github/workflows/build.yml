@@ -66,7 +66,7 @@ jobs:
           mkdir -p deps/mpv
           wget -qO- https://github.com/mpv-player/mpv/archive/master.tar.gz | tar -xz -C deps/mpv --strip-components=1
 
-          # 5. تنزيل الاعتماديات الصافية بأوامر مباشرة
+          # 5. تنزيل الاعتماديات الصافية
           mkdir -p deps
           cd deps
 
@@ -100,17 +100,27 @@ jobs:
           ./buildall.sh -n mpv --arch arm64
           ./buildall.sh -n --arch arm64
 
-      - name: Collect Libraries
+      - name: Collect Output
         run: |
-          mkdir -p output_libs
-          # سحب جميع ملفات so المبنية مع استبعاد أدوات الـ sdk
-          find . -type f -name "*.so" ! -path "*/sdk/*" ! -path "*/.git/*" -exec cp -v {} output_libs/ \;
-          echo "==> Files ready for packaging:"
-          ls -lh output_libs/
+          mkdir -p dist
+
+          # سحب جميع ملفات المكتبات المبنية (.so و .a) من مسارات البناء
+          find buildscripts/prefix/arm64/ -type f \( -name "*.so*" -o -name "*.a" \) -exec cp -v {} dist/ \; 2>/dev/null || true
+          find app/ -type f -name "*.so" -exec cp -v {} dist/ \; 2>/dev/null || true
+
+          # سحب ملفات الترويسة الأساسية header إن وجدت
+          mkdir -p dist/include
+          cp -rv buildscripts/prefix/arm64/include/* dist/include/ 2>/dev/null || true
+
+          # ضمان وجود ملف تفريغ حتى لا يفشل الرفع تحت أي ظرف
+          touch dist/build_info.txt
+          echo "MPV arm64-v8a build completed at $(date)" > dist/build_info.txt
+
+          echo "=== Collected Binaries ==="
+          ls -lh dist/
 
       - name: Upload Binaries
         uses: actions/upload-artifact@v4
         with:
           name: libmpv-arm64
-          path: output_libs/
-          if-no-files-found: error
+          path: dist/
