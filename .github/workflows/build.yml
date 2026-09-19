@@ -32,7 +32,7 @@ jobs:
           PREFIX="$WORKDIR/prefix"
           mkdir -p "$PREFIX"
 
-          # 1. خريطة الرموز مع كشف دوال JNI و FFmpeg المطلوبة
+          # 1. خريطة الرموز لعزل الدوال الزائدة وحفظ واجهات التطبيق
           cat << 'EOF' > mpv.map
           {
               global:
@@ -46,19 +46,25 @@ jobs:
           };
           EOF
 
-          # 2. رايات تحسين الحجم الأساسية
-          export GLOBAL_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections -fmerge-all-constants"
-          export FFMPEG_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384"
+          # 2. رايات التجميع المشتركة
+          export FFMPEG_CFLAGS="-Os -flto -ffunction-sections -fdata-sections -fmerge-all-constants -fPIC"
+          export FFMPEG_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,-z,max-page-size=16384"
 
-          # 3. بناء FFmpeg مجرد من كوديكس وموزعات الترجمة
+          # 3. بناء FFmpeg بشكل Static لدمجه بالكامل داخل libmpv.so
           mkdir -p build_ffmpeg && cd build_ffmpeg
           ../ffmpeg/configure \
             --target-os=android --arch=aarch64 --cpu=armv8-a --enable-cross-compile \
-            --cross-prefix=aarch64-linux-android24- --cc=aarch64-linux-android24-clang \
+            --cc=aarch64-linux-android24-clang \
+            --cxx=aarch64-linux-android24-clang++ \
+            --ar=llvm-ar \
+            --ranlib=llvm-ranlib \
+            --strip=llvm-strip \
+            --nm=llvm-nm \
             --prefix="$PREFIX" \
-            --extra-cflags="$GLOBAL_CFLAGS -I$PREFIX/include" \
+            --extra-cflags="$FFMPEG_CFLAGS -I$PREFIX/include" \
             --extra-ldflags="$FFMPEG_LDFLAGS -L$PREFIX/lib" \
-            --disable-static --enable-shared --disable-everything --disable-doc --disable-programs \
+            --enable-static --disable-shared --enable-pic \
+            --disable-everything --disable-doc --disable-programs \
             --disable-encoders --disable-muxers --disable-devices --disable-filters \
             --disable-iconv --disable-bzlib --disable-lzma --disable-xlib \
             --enable-swscale \
@@ -73,7 +79,7 @@ jobs:
           make install
           cd "$WORKDIR"
 
-          # 4. ملف الـ Cross compilation لـ Meson مع تطبيق خريطة mpv.map هنا
+          # 4. تجهيز ملف Cross compilation لـ Meson
           export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
           export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 
@@ -96,7 +102,7 @@ jobs:
           c_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=all', '-Wl,--pack-dyn-relocs=android+relr', '-Wl,--hash-style=gnu', '-Wl,-z,max-page-size=16384', '-Wl,--version-script=$WORKDIR/mpv.map', '-L$PREFIX/lib']
           EOF
 
-          # 5. بناء MPV مع إيقاف الترجمة ومحركات السكربتات
+          # 5. بناء MPV ودمج FFmpeg داخله كـ Shared Library وحيدة
           meson setup build_mpv mpv \
             --cross-file=android_cross.txt \
             --prefix="$PREFIX" \
@@ -112,8 +118,8 @@ jobs:
           ninja -C build_mpv -j$(nproc)
           ninja -C build_mpv install
 
-          # 6. تجريد المقاطع الزائدة
-          llvm-strip --strip-debug --strip-unneeded -R .comment "$PREFIX/lib/libmpv.so"
+          # 6. التجريد النهائي وحذف المقاطع غير المستخدمة
+          llvm-strip --strip-all -R .comment -R .note "$PREFIX/lib/libmpv.so"
 
       - name: Upload Ultra-Lean libmpv.so
         uses: actions/upload-artifact@v4
