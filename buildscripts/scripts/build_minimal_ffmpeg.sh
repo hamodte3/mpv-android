@@ -8,11 +8,17 @@ BUILD_DIR="${SCRIPT_DIR}/build/ffmpeg"
 mkdir -p "${BUILD_DIR}" "${PREFIX}"
 cd "${BUILD_DIR}"
 
+# إجبار FFmpeg على تصدير واجهاته البرمجية لكي يراها كود التطبيق في thumbnail.cpp
+SAFE_CFLAGS="${EXTRA_CFLAGS:-} -I${PREFIX}/include -fvisibility=default"
+
 FFMPEG_MINIMAL_FLAGS=(
   --target-os=android
   --arch=aarch64
   --cpu=armv8-a
   --enable-cross-compile
+  --cross-prefix=aarch64-linux-android24-
+  --cc=aarch64-linux-android24-clang
+  --prefix="${PREFIX}"
   --disable-static
   --enable-shared
   --disable-everything
@@ -26,26 +32,22 @@ FFMPEG_MINIMAL_FLAGS=(
   --disable-bzlib
   --disable-lzma
   --disable-xlib
+  --enable-swscale
   --enable-jni
   --enable-mediacodec
-  --enable-mbedtls
-  --enable-libdav1d
   --disable-hwaccels
   --enable-hwaccel=h264_mediacodec
   --enable-hwaccel=hevc_mediacodec
   --enable-hwaccel=vp9_mediacodec
   --enable-hwaccel=av1_mediacodec
-  --enable-decoder=h264,hevc,vp8,vp9,mpeg4,libdav1d
-  --enable-decoder=aac,flac,opus,mp3,ac3,eac3,vorbis
-  --enable-parser=h264,hevc,av1,vp9,aac,mpegaudio,opus,flac,vorbis
-  --enable-demuxer=mov,matroska,flv,hls,dash,aac,flac,mp3,ogg,mpegts
+  --enable-decoder=h264,hevc,vp8,vp9,mpeg4,aac,mp3
+  --enable-parser=h264,hevc,av1,vp9,aac,mpegaudio
+  --enable-demuxer=mov,matroska,flv,hls,dash,aac,mp3,mpegts
   --enable-protocol=file,http,https,tcp,udp,hls,tls
 )
 
-# تمرير راياتك المنحوتة ومسار التثبيت
 ../../ffmpeg/configure "${FFMPEG_MINIMAL_FLAGS[@]}" \
-  --prefix="${PREFIX}" \
-  --extra-cflags="${EXTRA_CFLAGS:-} -I${PREFIX}/include" \
+  --extra-cflags="${SAFE_CFLAGS}" \
   --extra-ldflags="${EXTRA_LDFLAGS:-} -L${PREFIX}/lib"
 
 make -j$(nproc)
