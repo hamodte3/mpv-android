@@ -9,33 +9,37 @@ v_ndk_n=30.0.16248370
 v_sdk_platform=36
 v_sdk_build_tools=36.0.0
 
-v_lua=5.2.4
-v_unibreak=8.0
-v_harfbuzz=14.4.0
-v_fribidi=1.0.16
-v_freetype=2.14.3
+# تم الإبقاء فقط على حزم التشفير والشبكة الضرورية لروابط البث (HTTPS)
 v_mbedtls=3.6.7
-v_libxml2=2.15.4
-v_fontconfig=2.18.3
 v_curl=8.21.0
 
 
-## Dependency tree
+## Dependency tree (Ultra-Lean Architecture)
 
 dep_mbedtls=()
 dep_dav1d=()
 dep_libxml2=()
-dep_ffmpeg=(mbedtls dav1d libxml2)
+
+# FFmpeg يعتمد فقط على mbedtls لفتح روابط البث المشفرة (HTTPS/TLS)
+dep_ffmpeg=(mbedtls)
+
+# تم تصفير وتفريغ منظومة الترجمة والخطوط بالكامل
 dep_freetype2=()
-dep_fontconfig=(libxml2 freetype2)
+dep_fontconfig=()
 dep_fribidi=()
 dep_harfbuzz=()
 dep_unibreak=()
-dep_libass=(freetype2 fontconfig fribidi harfbuzz unibreak)
+dep_libass=()
+
+# تم إيقاف محركات السكربتات
 dep_lua=()
+
+# محرك الرندر الأساسي والشبكة
 dep_libplacebo=()
 dep_curl=(mbedtls)
-dep_mpv=(ffmpeg libass lua libplacebo curl)
+
+# مشغل MPV مصفى: فيديو + صوت + رندر + شبكة فقط
+dep_mpv=(ffmpeg libplacebo curl)
 dep_mpv_android=(mpv)
 
 
@@ -44,5 +48,5 @@ dep_mpv_android=(mpv)
 # pinned ffmpeg revision
 v_ci_ffmpeg=n9.0
 
-# filename used to uniquely identify a build prefix
-ci_tarball="prefix-n${v_ndk}-l${v_lua}-u${v_unibreak}-h${v_harfbuzz}-fr${v_fribidi}-ft${v_freetype}-x${v_libxml2}-fo${v_fontconfig}-m${v_mbedtls}-c${v_curl}-ff${v_ci_ffmpeg}.tgz"
+# بصمة الكاش الجديدة المصفاة من كل مكتبات الترجمة الميتة
+ci_tarball="prefix-n${v_ndk}-m${v_mbedtls}-c${v_curl}-ff${v_ci_ffmpeg}-arm64-ultralean.tgz"
