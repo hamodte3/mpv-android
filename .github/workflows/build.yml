@@ -298,8 +298,16 @@ jobs:
         run: |
           mkdir -p dist
 
+          # 1. تجميع ملفات MPV المبنية النظيفة
           find buildscripts/prefix/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
           find app/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
+
+          # 2. إنشاء libc++_shared.so خفيفة ومتوافقة مع محاذاة 16KB لإرضاء كلاس MPVLib
+          NDK_LLVM="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "void dummy(){}" | "${NDK_LLVM}/aarch64-linux-android24-clang" -x c - \
+            -shared -o dist/libc++_shared.so \
+            -Wl,-s \
+            -Wl,-z,max-page-size=16384
 
           echo "==> Final arm64-v8a Binaries:"
           ls -lh dist/
