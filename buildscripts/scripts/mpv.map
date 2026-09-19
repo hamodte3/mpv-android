@@ -1,0 +1,10 @@
+cat << 'EOF' > mpv.map
+{
+    global:
+        mpv_*;
+        Java_*;
+        JNI_OnLoad;
+    local:
+        *;
+};
+EOF
