@@ -299,20 +299,14 @@ jobs:
           set -euo pipefail
           mkdir -p dist
 
-          # 1. تجميع ملفات MPV المبنية
+          # 1. تجميع مكتبات MPV المبنية
           find buildscripts/prefix/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
           find app/ -type f -name "*.so*" -exec cp -v {} dist/ \; 2>/dev/null || true
 
-          # 2. بناء libc++_shared.so نظيفة بحجم 3KB مع دعم -fPIC ومحاذاة 16KB
-          NDK_LLVM="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          echo "void dummy(void) {}" > dummy.c
-
-          "${NDK_LLVM}/aarch64-linux-android24-clang" -fPIC -shared dummy.c \
-            -o dist/libc++_shared.so \
-            -Wl,-s \
-            -Wl,-z,max-page-size=16384
-
-          rm -f dummy.c
+          # 2. سحب libc++_shared الأصلية من NDK r30 وتجريدها
+          LIBCXX_SRC=$(find "${ANDROID_NDK_HOME}" -name "libc++_shared.so" | grep "aarch64-linux-android" | head -n 1)
+          cp -v "${LIBCXX_SRC}" dist/
+          llvm-strip --strip-unneeded -R .comment dist/libc++_shared.so
 
           echo "==> Final arm64-v8a Binaries:"
           ls -lh dist/
