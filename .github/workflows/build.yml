@@ -247,9 +247,7 @@ jobs:
               --buildtype=release \
               --default-library=static \
               -Db_staticpic=true \
-              -Dauto_features=disabled \
-              -Dfontconfig=disabled \
-              -Dharfbuzz=disabled
+              -Dauto_features=disabled
             ninja -C "build/libass" -j$(nproc) install
           else
             mkdir -p build/libass
@@ -260,7 +258,6 @@ jobs:
               --enable-static \
               --disable-shared \
               --disable-fontconfig \
-              --disable-harfbuzz \
               --disable-require-system-font-provider \
               CC="${NDK_LLVM}/aarch64-linux-android24-clang" \
               AR="${NDK_LLVM}/llvm-ar" \
