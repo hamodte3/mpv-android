@@ -1,10 +1,10 @@
-cat << 'EOF' > mpv.map
 {
     global:
         mpv_*;
+        av_*;
+        sws_*;
         Java_*;
         JNI_OnLoad;
     local:
         *;
 };
-EOF
