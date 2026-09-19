@@ -1,5 +1,11 @@
 #!/bin/bash -e
 
+# الانتقال لمجلد buildscripts
+cd "$( dirname "${BASH_SOURCE[0]}" )/.."
+
+. ./include/depinfo.sh
+
+v_ci_archs="arm64"
 ## Dependency versions
 v_sdk=11076708_latest
 v_ndk=r30
