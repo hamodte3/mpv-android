@@ -183,7 +183,7 @@ jobs:
           echo "==> libplacebo static build completed successfully!"
           EOF
 
-          # 5. سكربت بناء حزمة الترجمة والخطوط (FreeType + FriBidi + libass) كـ Static
+          # 5. سكربت بناء حزمة الترجمة والخطوط (FreeType + FriBidi + HarfBuzz + libass) كـ Static
           cat << 'EOF' > "$CORE_DIR/scripts/build_libass.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -196,7 +196,6 @@ jobs:
           export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PREFIX}/lib64/pkgconfig:${PKG_CONFIG_PATH:-}"
           export PKG_CONFIG_LIBDIR="${PREFIX}/lib/pkgconfig"
 
-          # صمام أمان: منع LTO عن أدوات السيرفر المضيف (Host Tools)
           export CFLAGS_FOR_BUILD="-fno-lto"
           export LDFLAGS_FOR_BUILD="-fno-lto"
 
@@ -246,7 +245,38 @@ jobs:
             -Dtests=false
           ninja -C "${FB_BUILD}" -j$(nproc) install
 
-          # 5.3 بناء libass (Static)
+          # 5.3 بناء HarfBuzz (Static - مصغر بدون ملحقات)
+          HB_SRC="${SCRIPT_DIR}/deps/harfbuzz"
+          [ -d "${HB_SRC}" ] || HB_SRC="${SCRIPT_DIR}/../deps/harfbuzz"
+          if [ ! -d "${HB_SRC}" ]; then
+            echo "==> Cloning harfbuzz..."
+            git clone --depth 1 https://github.com/harfbuzz/harfbuzz.git "${HB_SRC}"
+          fi
+          HB_BUILD="${SCRIPT_DIR}/build/harfbuzz"
+
+          echo "==> Building HarfBuzz (Static)..."
+          rm -rf "${HB_BUILD}"
+          meson setup "${HB_BUILD}" "${HB_SRC}" \
+            --cross-file="${CROSS_FILE}" \
+            --prefix="${PREFIX}" \
+            --libdir=lib \
+            --buildtype=release \
+            --default-library=static \
+            -Db_staticpic=true \
+            -Doptimization=s \
+            -Dauto_features=disabled \
+            -Dfreetype=enabled \
+            -Dglib=disabled \
+            -Dgobject=disabled \
+            -Dcairo=disabled \
+            -Dfontconfig=disabled \
+            -Dicu=disabled \
+            -Dtests=disabled \
+            -Ddocs=disabled \
+            -Dbenchmark=disabled
+          ninja -C "${HB_BUILD}" -j$(nproc) install
+
+          # 5.4 بناء libass (Static)
           ASS_SRC="${SCRIPT_DIR}/deps/libass"
           [ -d "${ASS_SRC}" ] || ASS_SRC="${SCRIPT_DIR}/../deps/libass"
           if [ ! -d "${ASS_SRC}" ]; then
@@ -279,7 +309,6 @@ jobs:
               --disable-shared \
               --enable-static \
               --disable-fontconfig \
-              --disable-harfbuzz \
               --disable-require-system-font-provider \
               CC="${NDK_LLVM}/bin/${TARGET}-clang" \
               CXX="${NDK_LLVM}/bin/${TARGET}-clang++" \
@@ -292,7 +321,9 @@ jobs:
             make install
           fi
 
-          echo "==> libass installed successfully into prefix!"
+          echo "==> Font & ASS stack installed successfully into prefix!"
+          EOF
+          
           # 6. سكربت بناء MPV المصغر
           cat << 'EOF' > "$CORE_DIR/scripts/build_mpv.sh"
           #!/usr/bin/env bash
