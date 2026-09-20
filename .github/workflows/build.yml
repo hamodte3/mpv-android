@@ -9,13 +9,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. سحب مستودعك الخاص (الذي يحتوي على سكريبتاتك المخصصة)
+      # 1. سحب مستودعك الخاص
       - name: Checkout Your Custom Repository
         uses: actions/checkout@v4
         with:
           path: user-repo
 
-      # 2. سحب سورس mpv-android الرسمي للبناء
+      # 2. سحب سورس mpv-android الرسمي
       - name: Checkout mpv-android Upstream
         uses: actions/checkout@v4
         with:
@@ -35,6 +35,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             ninja-build \
+            gperf \
             autoconf \
             automake \
             libtool \
@@ -81,50 +82,49 @@ jobs:
           USER_DIR="$GITHUB_WORKSPACE/user-repo"
           CORE_DIR="$GITHUB_WORKSPACE/mpv-core/buildscripts"
 
-          echo "==> Injecting your custom scripts into mpv-android..."
+          echo "==> Injecting your custom scripts..."
 
-          # البحث التلقائي عن ملفاتك الأربعة داخل مستودعك ونسخها لمسار البناء
-          find "$USER_DIR" -name "build_minimal_ffmpeg.sh" -exec cp -v {} "$CORE_DIR/scripts/" \;
-          find "$USER_DIR" -name "build_mpv.sh" -exec cp -v {} "$CORE_DIR/scripts/" \;
-          find "$USER_DIR" -name "mpv.map" -exec cp -v {} "$CORE_DIR/scripts/" \;
-          find "$USER_DIR" -name "mpv.map" -exec cp -v {} "$CORE_DIR/" \;
-          
-          # نسخ buildall.sh المخصص لمجلد buildscripts ومجلد scripts لضمان استدعائه
+          # نسخ سكريبت FFmpeg المخصص بالاسمين لضمان استدعائه حتماً
+          find "$USER_DIR" -name "build_minimal_ffmpeg.sh" -exec cp -v {} "$CORE_DIR/scripts/build_minimal_ffmpeg.sh" \;
+          find "$USER_DIR" -name "build_minimal_ffmpeg.sh" -exec cp -v {} "$CORE_DIR/scripts/ffmpeg.sh" \;
+
+          # نسخ سكريبت MPV المخصص بالاسمين
+          find "$USER_DIR" -name "build_mpv.sh" -exec cp -v {} "$CORE_DIR/scripts/build_mpv.sh" \;
+          find "$USER_DIR" -name "build_mpv.sh" -exec cp -v {} "$CORE_DIR/scripts/mpv.sh" \;
+
+          # نسخ خريطة الرموز mpv.map
+          find "$USER_DIR" -name "mpv.map" -exec cp -v {} "$CORE_DIR/scripts/mpv.map" \;
+          find "$USER_DIR" -name "mpv.map" -exec cp -v {} "$CORE_DIR/mpv.map" \;
+
+          # نسخ buildall.sh للجذر ولمجلد scripts
           find "$USER_DIR" -name "buildall.sh" -exec cp -v {} "$CORE_DIR/buildall.sh" \;
           find "$USER_DIR" -name "buildall.sh" -exec cp -v {} "$CORE_DIR/scripts/buildall.sh" \;
 
-          # إعطاء صلاحيات التشغيل للسكريبتات
           chmod +x "$CORE_DIR"/*.sh "$CORE_DIR"/scripts/*.sh
 
           cd "$CORE_DIR"
 
-          # تفادي سيرفر freedesktop المتوقف بربطه مع غيت هاب
+          # تفادي سيرفر freedesktop المتوقف
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype.git"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype"
           find . -type f \( -name "*.sh" -o -name "*.cfg" \) -exec sed -i 's|https://gitlab.freedesktop.org/freetype/freetype.git|https://github.com/freetype/freetype.git|g' {} + 2>/dev/null || true
 
-          # تنزيل الاعتماديات
           ./download.sh
 
-          # إلغاء قيود إصدار meson الصارمة
           find deps/ -name "meson.build" -exec sed -i "s/meson_version : '>= [0-9.]*'/meson_version : '>= 0.60.0'/g" {} + 2>/dev/null || true
 
-          # تطبيق إعدادات التحسين ومحاذاة 16KB وربط C++ الساكن
           export EXTRA_CFLAGS="-Os -flto -ffunction-sections -fdata-sections"
           export EXTRA_LDFLAGS="-Wl,--gc-sections -flto -Wl,-z,max-page-size=16384 -static-libstdc++"
 
-          echo "==> Running your custom buildall.sh..."
+          echo "==> Running compilation..."
           ./buildall.sh --arch arm64
-
-          # تجريد أي رموز زائدة
-          find prefix/arm64/ -name "*.so" -exec llvm-strip --strip-unneeded -R .comment {} + 2>/dev/null || true
 
       - name: Assemble Release AAR
         run: |
           set -euo pipefail
           cd mpv-core
 
-          # 1. تنظيف app/build.gradle والمانيفست عبر بايثون
+          # 1. تحويل الموديول إلى Library وحذف خصائص الـ APK
           python3 - << 'EOF'
           import re
 
@@ -202,26 +202,26 @@ jobs:
             sed -i 's/\bVERSION_CODE\b/1/g' "$ABOUT_FILE"
           fi
 
-          # 3. حذف أي symlink قديم وتجهيز مسار نظيف
+          # 3. استخراج libmpv.so و libplayer.so فقط وتجاهل ملفات الوسائط المؤقتة
           rm -rf app/src/main/jniLibs app/libs
           mkdir -p app/src/main/jniLibs/arm64-v8a
 
-          # نسخ المكتبات النهائية الصافية فقط من مجلد prefix
-          echo "==> Copying production libraries from prefix..."
-          find buildscripts/prefix/arm64/lib/ -maxdepth 1 -name "*.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \;
+          echo "==> Locating built libraries..."
+          find buildscripts/ -type f -name "libmpv.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \;
+          find buildscripts/ -type f -name "libplayer.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \; 2>/dev/null || true
 
-          # تجريد كافة ملفات .so من رموز الـ Debug لتقليص الحجم للحد الأدنى
-          echo "==> Stripping debug symbols..."
+          # تجريد المكتبات من رموز الـ Debug لتقليص الحجم للحد الأدنى الصافي
+          echo "==> Stripping symbols..."
           find app/src/main/jniLibs/arm64-v8a/ -name "*.so" -exec "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all -R .comment -R .note {} +
 
-          echo "==> Production libraries size:"
+          echo "==> Final native libraries:"
           ls -lh app/src/main/jniLibs/arm64-v8a/
 
           # 4. بناء الـ AAR عبر Gradle
           chmod +x gradlew
           ./gradlew :app:assembleDefaultRelease -x lint -x test --no-daemon
 
-          # 5. استخراج الـ AAR والتحقق من الحجم والمحتوى
+          # 5. استخراج الـ AAR النهائي وفحص محتوياته
           mkdir -p ../dist
           find app/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} ../dist/mpv-android.aar \;
 
