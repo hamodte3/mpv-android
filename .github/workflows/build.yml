@@ -266,9 +266,7 @@ jobs:
               --default-library=static \
               -Db_staticpic=true \
               -Doptimization=s \
-              -Dauto_features=disabled \
-              -Dfontconfig=disabled \
-              -Dharfbuzz=disabled
+              -Dauto_features=disabled
             ninja -C "${ASS_BUILD}" -j$(nproc) install
           else
             cd "${ASS_SRC}"
@@ -295,8 +293,6 @@ jobs:
           fi
 
           echo "==> libass installed successfully into prefix!"
-          EOF
-
           # 6. سكربت بناء MPV المصغر
           cat << 'EOF' > "$CORE_DIR/scripts/build_mpv.sh"
           #!/usr/bin/env bash
