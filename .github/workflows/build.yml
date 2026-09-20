@@ -287,7 +287,8 @@ jobs:
             --default-library=static \
             -Db_staticpic=true \
             -Doptimization=s \
-            -Dauto_features=disabled
+            -Dauto_features=disabled \
+            -Drequire-system-font-provider=false
           ninja -C "${ASS_BUILD}" -j$(nproc) install
           else
             cd "${ASS_SRC}"
