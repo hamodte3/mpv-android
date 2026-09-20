@@ -165,23 +165,7 @@ jobs:
 
           echo "==> Final Generated AAR:"
           ls -lh dist/
-
-          # 2. تنظيف الـ Manifest لمنع تعارضات الخصائص
-          sed -i '/android:icon=/d' app/src/main/AndroidManifest.xml || true
-          sed -i '/android:roundIcon=/d' app/src/main/AndroidManifest.xml || true
-          sed -i '/android:label=/d' app/src/main/AndroidManifest.xml || true
-          sed -i '/android:theme=/d' app/src/main/AndroidManifest.xml || true
-
-          # 3. بناء ملف الـ AAR
-          chmod +x gradlew
-          ./gradlew assembleRelease -x lint -x test --no-daemon
-
-          # 4. نسخ ملف الـ AAR الناتج إلى مجلد dist
-          mkdir -p dist
-          find app/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} dist/mpv-android.aar \;
-
-          echo "==> Final Generated AAR:"
-          ls -lh dist/
+          
       - name: Upload MPV AAR
         uses: actions/upload-artifact@v4
         with:
