@@ -83,9 +83,6 @@ jobs:
 
           mkdir -p "$CORE_DIR/scripts"
 
-          # نسخ أي سكربتات مخصصة من مستودعك إن وجدت
-          find "$USER_DIR" -type f \( -name "*.sh" -o -name "mpv.map" \) -exec cp -v {} "$CORE_DIR/scripts/" \;
-
           # 1. إعداد المتغيرات الموحدة depinfo.sh
           cat << 'EOF' > "$CORE_DIR/scripts/depinfo.sh"
           #!/usr/bin/env bash
@@ -101,7 +98,7 @@ jobs:
           fi
           EOF
 
-          # 2. سكربت بناء mbedtls (دعم HTTPS)
+          # 2. سكربت بناء mbedtls (دعم HTTPS والتشفير)
           cat << 'EOF' > "$CORE_DIR/scripts/build_mbedtls.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -114,7 +111,7 @@ jobs:
           SRC_DIR="${SCRIPT_DIR}/deps/mbedtls"
           [ -d "${SRC_DIR}" ] || SRC_DIR="${SCRIPT_DIR}/../deps/mbedtls"
 
-          echo "==> Building mbedtls for HTTPS..."
+          echo "==> Building mbedtls..."
           mkdir -p "${BUILD_DIR}" "${PREFIX}"
 
           cmake -B "${BUILD_DIR}" -S "${SRC_DIR}" \
@@ -129,10 +126,84 @@ jobs:
             -DCMAKE_C_FLAGS="-Os -flto -fPIC -Qunused-arguments"
 
           ninja -C "${BUILD_DIR}" install
-          echo "==> mbedtls installed successfully in prefix."
+          echo "==> mbedtls installed successfully."
           EOF
 
-          # 3. سكربت بناء libplacebo (Static)
+          # 3. سكربت بناء FFmpeg المصغر (حل مشكلة mbedtls_entropy_func و av_write_trailer)
+          cat << 'EOF' > "$CORE_DIR/scripts/build_minimal_ffmpeg.sh"
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          . "${SCRIPT_DIR}/depinfo.sh"
+
+          PREFIX="${SCRIPT_DIR}/prefix"
+          BUILD_DIR="${SCRIPT_DIR}/build/ffmpeg"
+          FFMPEG_SRC="${SCRIPT_DIR}/deps/ffmpeg"
+          [ -d "${FFMPEG_SRC}" ] || FFMPEG_SRC="${SCRIPT_DIR}/../deps/ffmpeg"
+
+          mkdir -p "${BUILD_DIR}" "${PREFIX}"
+          cd "${BUILD_DIR}"
+
+          export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PREFIX}/lib64/pkgconfig:${PKG_CONFIG_PATH:-}"
+
+          SAFE_CFLAGS="${EXTRA_CFLAGS:-} -I${PREFIX}/include -fvisibility=default"
+          SAFE_LDFLAGS="-Wl,-z,max-page-size=16384 -Wl,--gc-sections -L${PREFIX}/lib"
+
+          FFMPEG_MINIMAL_FLAGS=(
+            --target-os=android
+            --arch=aarch64
+            --cpu=armv8-a
+            --enable-cross-compile
+            --cc="${TARGET}-clang"
+            --cxx="${TARGET}-clang++"
+            --ar=llvm-ar
+            --ranlib=llvm-ranlib
+            --nm=llvm-nm
+            --strip=llvm-strip
+            --prefix="${PREFIX}"
+            --pkg-config=pkg-config
+            --pkg-config-flags="--static"
+            --enable-version3
+            --enable-mbedtls
+            --disable-static
+            --enable-shared
+            --disable-everything
+            --disable-doc
+            --disable-programs
+            --disable-encoders
+            --disable-devices
+            --disable-filters
+            --disable-iconv
+            --disable-bzlib
+            --disable-lzma
+            --disable-xlib
+            --enable-swscale
+            --enable-jni
+            --enable-mediacodec
+            --disable-hwaccels
+            --enable-hwaccel=h264_mediacodec
+            --enable-hwaccel=hevc_mediacodec
+            --enable-hwaccel=vp9_mediacodec
+            --enable-hwaccel=av1_mediacodec
+            --enable-decoder=h264,hevc,vp8,vp9,mpeg4,aac,mp3,flac
+            --enable-parser=h264,hevc,av1,vp9,aac,mpegaudio
+            --enable-demuxer=mov,matroska,flv,hls,dash,aac,mp3,mpegts
+            --enable-muxer=image2
+            --enable-protocol=file,http,https,tcp,udp,hls,tls
+          )
+
+          "${FFMPEG_SRC}/configure" "${FFMPEG_MINIMAL_FLAGS[@]}" \
+            --extra-cflags="${SAFE_CFLAGS}" \
+            --extra-ldflags="${SAFE_LDFLAGS}" \
+            --extra-libs="-Wl,--whole-archive -lmbedtls -lmbedx509 -lmbedcrypto -Wl,--no-whole-archive"
+
+          make -j"$(nproc)"
+          make install
+          echo "==> Minimal FFmpeg installed successfully."
+          EOF
+
+          # 4. سكربت بناء libplacebo (Static)
           cat << 'EOF' > "$CORE_DIR/scripts/build_libplacebo.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -181,7 +252,7 @@ jobs:
           echo "==> libplacebo static build completed successfully!"
           EOF
 
-          # 4. سكربت بناء حزمة الخطوط والترجمة (FreeType + FriBidi + HarfBuzz + libass) كـ Static
+          # 5. سكربت بناء الخطوط والترجمة (HarfBuzz بدون استثناءات لإلغاء خطأ C++)
           cat << 'EOF' > "$CORE_DIR/scripts/build_libass.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -197,16 +268,14 @@ jobs:
           export CFLAGS_FOR_BUILD="-fno-lto"
           export LDFLAGS_FOR_BUILD="-fno-lto"
 
-          # 4.1 بناء FreeType
+          # 5.1 FreeType
           FT_SRC="${SCRIPT_DIR}/deps/freetype"
           [ -d "${FT_SRC}" ] || FT_SRC="${SCRIPT_DIR}/../deps/freetype"
           if [ ! -d "${FT_SRC}" ]; then
-            echo "==> Cloning freetype..."
             git clone --depth 1 https://github.com/freetype/freetype.git "${FT_SRC}"
           fi
           FT_BUILD="${SCRIPT_DIR}/build/freetype"
 
-          echo "==> Building FreeType (Static)..."
           rm -rf "${FT_BUILD}"
           meson setup "${FT_BUILD}" "${FT_SRC}" \
             --cross-file="${CROSS_FILE}" \
@@ -219,16 +288,14 @@ jobs:
             -Dauto_features=disabled
           ninja -C "${FT_BUILD}" -j$(nproc) install
 
-          # 4.2 بناء FriBidi
+          # 5.2 FriBidi
           FB_SRC="${SCRIPT_DIR}/deps/fribidi"
           [ -d "${FB_SRC}" ] || FB_SRC="${SCRIPT_DIR}/../deps/fribidi"
           if [ ! -d "${FB_SRC}" ]; then
-            echo "==> Cloning fribidi..."
             git clone --depth 1 https://github.com/fribidi/fribidi.git "${FB_SRC}"
           fi
           FB_BUILD="${SCRIPT_DIR}/build/fribidi"
 
-          echo "==> Building FriBidi (Static)..."
           rm -rf "${FB_BUILD}"
           meson setup "${FB_BUILD}" "${FB_SRC}" \
             --cross-file="${CROSS_FILE}" \
@@ -243,16 +310,14 @@ jobs:
             -Dtests=false
           ninja -C "${FB_BUILD}" -j$(nproc) install
 
-          # 4.3 بناء HarfBuzz
+          # 5.3 HarfBuzz (تعطيل الاستثناءات نهائياً)
           HB_SRC="${SCRIPT_DIR}/deps/harfbuzz"
           [ -d "${HB_SRC}" ] || HB_SRC="${SCRIPT_DIR}/../deps/harfbuzz"
           if [ ! -d "${HB_SRC}" ]; then
-            echo "==> Cloning harfbuzz..."
             git clone --depth 1 https://github.com/harfbuzz/harfbuzz.git "${HB_SRC}"
           fi
           HB_BUILD="${SCRIPT_DIR}/build/harfbuzz"
 
-          echo "==> Building HarfBuzz (Static)..."
           rm -rf "${HB_BUILD}"
           meson setup "${HB_BUILD}" "${HB_SRC}" \
             --cross-file="${CROSS_FILE}" \
@@ -263,19 +328,19 @@ jobs:
             -Db_staticpic=true \
             -Doptimization=s \
             -Dauto_features=disabled \
-            -Dfreetype=enabled
+            -Dfreetype=enabled \
+            -Dcpp_eh=none \
+            -Dcpp_rtti=false
           ninja -C "${HB_BUILD}" -j$(nproc) install
 
-          # 4.4 بناء libass
+          # 5.4 libass
           ASS_SRC="${SCRIPT_DIR}/deps/libass"
           [ -d "${ASS_SRC}" ] || ASS_SRC="${SCRIPT_DIR}/../deps/libass"
           if [ ! -d "${ASS_SRC}" ]; then
-            echo "==> Cloning libass..."
             git clone --depth 1 https://github.com/libass/libass.git "${ASS_SRC}"
           fi
           ASS_BUILD="${SCRIPT_DIR}/build/libass"
 
-          echo "==> Building libass (Static)..."
           rm -rf "${ASS_BUILD}"
           meson setup "${ASS_BUILD}" "${ASS_SRC}" \
             --cross-file="${CROSS_FILE}" \
@@ -288,11 +353,9 @@ jobs:
             -Dauto_features=disabled \
             -Drequire-system-font-provider=false
           ninja -C "${ASS_BUILD}" -j$(nproc) install
-
-          echo "==> Font & ASS stack installed successfully into prefix!"
           EOF
 
-          # 5. سكربت بناء MPV المصغر
+          # 6. سكربت بناء MPV المصغر (تعطيل الترميز -Dencoding=disabled لحذف av_write_trailer)
           cat << 'EOF' > "$CORE_DIR/scripts/build_mpv.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -320,6 +383,7 @@ jobs:
             "-Db_lto=true"
             "-Dcplayer=false"
             "-Dlibmpv=true"
+            "-Dencoding=disabled"
             "-Degl-android=enabled"
             "-Dlua=disabled"
             "-Djavascript=disabled"
@@ -330,14 +394,11 @@ jobs:
 
           echo "==> Configuring Minimal MPV with Meson..."
           meson setup "${BUILD_DIR}" "${MPV_SRC}" "${MESON_ARGS[@]}"
-
-          echo "==> Compiling libmpv with Ninja..."
           ninja -C "${BUILD_DIR}" -j$(nproc) install
-
-          echo "==> MPV Build Complete! libmpv.so is ready in: ${PREFIX}/lib"
+          echo "==> MPV Build Complete! libmpv.so ready."
           EOF
 
-          # 6. سكربت بناء جسر الأندرويد libplayer.so (مع -static-libstdc++ ودعم MediaCodec)
+          # 7. سكربت بناء جسر الأندرويد libplayer.so
           cat << 'EOF' > "$CORE_DIR/scripts/build_player.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -357,7 +418,6 @@ jobs:
           JNI_FILES=$(find "${JNI_DIR}" -type f \( -name "*.cpp" -o -name "*.c" \))
 
           "${CXX}" -shared -fPIC \
-            -static-libstdc++ \
             -Os -flto \
             -ffunction-sections -fdata-sections \
             -Wl,--gc-sections -Wl,-s \
@@ -366,13 +426,13 @@ jobs:
             -I"${PREFIX}/include" \
             -L"${PREFIX}/lib" \
             ${JNI_FILES} \
-            -lmpv -lavcodec -lavutil -landroid -llog -lOpenSLES -lEGL -lGLESv3 \
+            -lmpv -lavcodec -lavutil -lc++_shared -landroid -llog -lOpenSLES -lEGL -lGLESv3 \
             -o "${PREFIX}/lib/libplayer.so"
 
-          echo "==> libplayer.so built successfully in ${PREFIX}/lib!"
+          echo "==> libplayer.so built successfully."
           EOF
 
-          # 7. المنسق الرئيسي buildall.sh
+          # 8. المنسق الرئيسي buildall.sh (حقن -lc++_shared في الـ Cross file تلقائياً)
           cat << 'EOF' > "$CORE_DIR/scripts/buildall.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -405,15 +465,15 @@ jobs:
 
           [built-in options]
           c_args = ['-Os', '-flto', '-fvisibility=hidden', '-I${PREFIX}/include']
-          c_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=safe', '-Wl,-z,max-page-size=16384', '-static-libstdc++', '-L${PREFIX}/lib']
-          cpp_args = ['-Os', '-flto', '-fvisibility=hidden', '-I${PREFIX}/include']
-          cpp_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=safe', '-Wl,-z,max-page-size=16384', '-static-libstdc++', '-L${PREFIX}/lib']
+          c_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=safe', '-Wl,-z,max-page-size=16384', '-lc++_shared', '-L${PREFIX}/lib']
+          cpp_args = ['-Os', '-flto', '-fvisibility=hidden', '-I${PREFIX}/include', '-fno-exceptions', '-fno-rtti']
+          cpp_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=safe', '-Wl,-z,max-page-size=16384', '-lc++_shared', '-L${PREFIX}/lib']
           CROSS_EOF
 
-          echo "==> [3/8] Building mbedtls (HTTPS backend)..."
+          echo "==> [3/8] Building mbedtls..."
           bash "${SCRIPT_DIR}/build_mbedtls.sh"
 
-          echo "==> [4/8] Running FFmpeg Minimal Build..."
+          echo "==> [4/8] Running Minimal FFmpeg..."
           export EXTRA_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections -fmerge-all-constants"
           export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=safe -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384"
           bash "${SCRIPT_DIR}/build_minimal_ffmpeg.sh"
@@ -427,7 +487,7 @@ jobs:
           echo "==> [7/8] Building MPV..."
           bash "${SCRIPT_DIR}/build_mpv.sh"
 
-          echo "==> [8/8] Building libplayer.so (JNI Bridge)..."
+          echo "==> [8/8] Building libplayer.so..."
           bash "${SCRIPT_DIR}/build_player.sh"
 
           echo "==> Complete! Native Build Finished Successfully."
@@ -435,7 +495,7 @@ jobs:
 
           chmod +x "$CORE_DIR"/scripts/*.sh "$CORE_DIR"/*.sh
 
-          # تنزيل الاعتماديات وربط المسارات
+          # تنزيل الاعتماديات وتجهيز البيئة
           cd "$CORE_DIR"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype.git"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype"
@@ -457,7 +517,7 @@ jobs:
           set -euo pipefail
           cd mpv-core
 
-          # 1. تحويل الموديول إلى Library وحذف خصائص التطبيق
+          # تحويل الموديول إلى Library وحذف خصائص التطبيق
           python3 - << 'EOF'
           import re
 
@@ -524,7 +584,7 @@ jobs:
               f.write(manifest)
           EOF
 
-          # 2. تعديل AboutActivity.kt لتفادي خطأ الـ BuildConfig
+          # تعديل AboutActivity.kt لتفادي خطأ الـ BuildConfig
           ABOUT_FILE=$(find app/src/main/ -name "AboutActivity.kt" | head -n 1)
           if [ -n "$ABOUT_FILE" ] && [ -f "$ABOUT_FILE" ]; then
             sed -i '/import.*VERSION_NAME/d' "$ABOUT_FILE"
@@ -535,27 +595,29 @@ jobs:
             sed -i 's/\bVERSION_CODE\b/1/g' "$ABOUT_FILE"
           fi
 
-          # 3. جلب ملفات .so الصافية
+          # تجهيز مجلد jniLibs
           rm -rf app/src/main/jniLibs app/libs
           mkdir -p app/src/main/jniLibs/arm64-v8a
-          # سحب وتجريد libc++_shared.so تلقائياً من NDK السيرفر
+
+          # جلب مكتبة libc++_shared.so وتجريدها من 10MB إلى 1MB
           cp "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" app/src/main/jniLibs/arm64-v8a/
           "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-unneeded app/src/main/jniLibs/arm64-v8a/libc++_shared.so
 
+          # نسخ كافة المكتبات الناتجة
           echo "==> Packaging native libraries into jniLibs..."
           find buildscripts/scripts/prefix/lib/ -maxdepth 1 -name "*.so" -exec cp -v -aL {} app/src/main/jniLibs/arm64-v8a/ \;
 
-          # 4. تجريد آمن للمكتبات بدون حذف قسم .note الخاص بـ Android 15 والمحاذاة
+          # تجريد آمن لكافة المكتبات دون حذف قسم .note الخاص بـ Android 15 والمحاذاة
           find app/src/main/jniLibs/arm64-v8a/ -name "*.so" -exec "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-unneeded -R .comment {} + 2>/dev/null || true
 
           echo "==> Packaged native libraries list:"
           ls -lh app/src/main/jniLibs/arm64-v8a/
 
-          # 5. بناء الـ AAR عبر Gradle
+          # بناء الـ AAR عبر Gradle
           chmod +x gradlew
           ./gradlew :app:assembleDefaultRelease -x lint -x test --no-daemon
 
-          # 6. استخراج الـ AAR والتحقق النهائي
+          # استخراج الـ AAR
           mkdir -p ../dist
           find app/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} ../dist/mpv-android.aar \;
 
