@@ -245,7 +245,7 @@ jobs:
             -Dtests=false
           ninja -C "${FB_BUILD}" -j$(nproc) install
 
-          # 5.3 بناء HarfBuzz (Static - مصغر بدون ملحقات)
+          # 5.3 بناء HarfBuzz (Static - نظيف بدون افتراض أسماء ميزات)
           HB_SRC="${SCRIPT_DIR}/deps/harfbuzz"
           [ -d "${HB_SRC}" ] || HB_SRC="${SCRIPT_DIR}/../deps/harfbuzz"
           if [ ! -d "${HB_SRC}" ]; then
@@ -265,17 +265,9 @@ jobs:
             -Db_staticpic=true \
             -Doptimization=s \
             -Dauto_features=disabled \
-            -Dfreetype=enabled \
-            -Dglib=disabled \
-            -Dgobject=disabled \
-            -Dcairo=disabled \
-            -Dfontconfig=disabled \
-            -Dicu=disabled \
-            -Dtests=disabled \
-            -Ddocs=disabled \
-            -Dbenchmark=disabled
+            -Dfreetype=enabled
           ninja -C "${HB_BUILD}" -j$(nproc) install
-
+          
           # 5.4 بناء libass (Static)
           ASS_SRC="${SCRIPT_DIR}/deps/libass"
           [ -d "${ASS_SRC}" ] || ASS_SRC="${SCRIPT_DIR}/../deps/libass"
@@ -287,17 +279,16 @@ jobs:
 
           echo "==> Building libass (Static)..."
           rm -rf "${ASS_BUILD}"
-          if [ -f "${ASS_SRC}/meson.build" ]; then
-            meson setup "${ASS_BUILD}" "${ASS_SRC}" \
-              --cross-file="${CROSS_FILE}" \
-              --prefix="${PREFIX}" \
-              --libdir=lib \
-              --buildtype=release \
-              --default-library=static \
-              -Db_staticpic=true \
-              -Doptimization=s \
-              -Dauto_features=disabled
-            ninja -C "${ASS_BUILD}" -j$(nproc) install
+          meson setup "${ASS_BUILD}" "${ASS_SRC}" \
+            --cross-file="${CROSS_FILE}" \
+            --prefix="${PREFIX}" \
+            --libdir=lib \
+            --buildtype=release \
+            --default-library=static \
+            -Db_staticpic=true \
+            -Doptimization=s \
+            -Dauto_features=disabled
+          ninja -C "${ASS_BUILD}" -j$(nproc) install
           else
             cd "${ASS_SRC}"
             [ -f ./configure ] || ./autogen.sh
