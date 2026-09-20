@@ -82,18 +82,60 @@ jobs:
           USER_DIR="$GITHUB_WORKSPACE/user-repo"
           CORE_DIR="$GITHUB_WORKSPACE/mpv-core/buildscripts"
 
-          echo "==> Syncing scripts into buildscripts/scripts/..."
-          # نسخ الملفات الأربعة إلى مسار scripts في mpv-core
+          echo "==> Inspecting your repo files:"
+          find "$USER_DIR" -type f \( -name "*.sh" -o -name "mpv.map" \) -exec ls -lh {} +
+
           mkdir -p "$CORE_DIR/scripts"
-          find "$USER_DIR" -type f \( -name "buildall.sh" -o -name "buildall" -o -name "build_minimal_ffmpeg.sh" -o -name "build_mpv.sh" -o -name "mpv.map" \) -exec cp -v {} "$CORE_DIR/scripts/" \;
 
-          # توحيد الاسم إلى buildall.sh ومنح الصلاحيات
-          if [ -f "$CORE_DIR/scripts/buildall" ]; then
-            mv -v "$CORE_DIR/scripts/buildall" "$CORE_DIR/scripts/buildall.sh"
+          # نسخ سكريبتاتك المخصصة إلى مجلد scripts
+          find "$USER_DIR" -type f \( -name "build_minimal_ffmpeg.sh" -o -name "build_mpv.sh" -o -name "mpv.map" \) -exec cp -v {} "$CORE_DIR/scripts/" \;
+
+          # حقن buildall.sh بمحتواك مباشرة لضمان عدم وجود ملف فارغ نهائياً
+          cat << 'EOF' > "$CORE_DIR/scripts/buildall.sh"
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          export PATH="${HOME}/.local/bin:${PATH}"
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+          echo "==> [1/5] Cleaning old build & prefix artifacts..."
+          rm -rf "${SCRIPT_DIR}/build" "${SCRIPT_DIR}/prefix"
+
+          echo "==> [2/5] Setting Global Size & Linker Optimization Flags..."
+          export EXTRA_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections -fmerge-all-constants"
+          export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384 -Wl,--version-script=${SCRIPT_DIR}/mpv.map"
+
+          echo "==> [3/5] Running FFmpeg Minimal Build..."
+          if [ -f "${SCRIPT_DIR}/build_minimal_ffmpeg.sh" ]; then
+            bash "${SCRIPT_DIR}/build_minimal_ffmpeg.sh"
+          else
+            echo "ERROR: build_minimal_ffmpeg.sh not found in ${SCRIPT_DIR}!"
+            exit 1
           fi
-          chmod +x "$CORE_DIR"/scripts/*.sh "$CORE_DIR"/*.sh 2>/dev/null || true
 
-          # تنزيل الاعتماديات الرسمية أولاً
+          echo "==> [4/5] Building MPV..."
+          if [ -f "${SCRIPT_DIR}/build_mpv.sh" ]; then
+            bash "${SCRIPT_DIR}/build_mpv.sh"
+          else
+            echo "ERROR: build_mpv.sh not found in ${SCRIPT_DIR}!"
+            exit 1
+          fi
+
+          echo "==> [5/5] Post-Processing: Stripping .comment notes..."
+          if command -v llvm-strip &> /dev/null; then
+            find "${SCRIPT_DIR}/prefix" -name "*.so" -exec llvm-strip --strip-debug --strip-unneeded -R .comment {} + 2>/dev/null || true
+            echo "==> Stripped .comment notes using llvm-strip."
+          fi
+
+          echo "==> Complete! Optimized NDK Build Finished Successfully."
+          EOF
+
+          chmod +x "$CORE_DIR"/scripts/*.sh "$CORE_DIR"/*.sh
+
+          echo "==> Verifying scripts directory before execution:"
+          ls -lh "$CORE_DIR/scripts/"
+
+          # تنزيل الاعتماديات
           cd "$CORE_DIR"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype.git"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype"
@@ -102,10 +144,10 @@ jobs:
           ./download.sh
           find deps/ -name "meson.build" -exec sed -i "s/meson_version : '>= [0-9.]*'/meson_version : '>= 0.60.0'/g" {} + 2>/dev/null || true
 
-          # تشغيل buildall.sh من داخل مجلد scripts لضمان مطابقة SCRIPT_DIR
-          echo "==> Running custom buildall.sh from scripts/..."
+          # تشغيل السكريبت مع طباعة كامل التفاصيل سطر بسطر
+          echo "==> Launching compilation process..."
           cd "$CORE_DIR/scripts"
-          ./buildall.sh
+          bash -x ./buildall.sh
 
       - name: Assemble Release AAR
         run: |
