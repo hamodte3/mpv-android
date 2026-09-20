@@ -82,15 +82,12 @@ jobs:
           USER_DIR="$GITHUB_WORKSPACE/user-repo"
           CORE_DIR="$GITHUB_WORKSPACE/mpv-core/buildscripts"
 
-          echo "==> Inspecting your repo files:"
-          find "$USER_DIR" -type f \( -name "*.sh" -o -name "mpv.map" \) -exec ls -lh {} +
-
           mkdir -p "$CORE_DIR/scripts"
 
-          # نسخ سكريبتاتك المخصصة إلى مجلد scripts
+          # 1. نسخ سكريبتاتك المخصصة إلى مجلد scripts
           find "$USER_DIR" -type f \( -name "build_minimal_ffmpeg.sh" -o -name "build_mpv.sh" -o -name "mpv.map" \) -exec cp -v {} "$CORE_DIR/scripts/" \;
 
-          # حقن buildall.sh بمحتواك مباشرة لضمان عدم وجود ملف فارغ نهائياً
+          # 2. حقن سكريبت buildall.sh
           cat << 'EOF' > "$CORE_DIR/scripts/buildall.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -132,10 +129,7 @@ jobs:
 
           chmod +x "$CORE_DIR"/scripts/*.sh "$CORE_DIR"/*.sh
 
-          echo "==> Verifying scripts directory before execution:"
-          ls -lh "$CORE_DIR/scripts/"
-
-          # تنزيل الاعتماديات
+          # 3. تنزيل الاعتماديات
           cd "$CORE_DIR"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype.git"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype"
@@ -144,7 +138,12 @@ jobs:
           ./download.sh
           find deps/ -name "meson.build" -exec sed -i "s/meson_version : '>= [0-9.]*'/meson_version : '>= 0.60.0'/g" {} + 2>/dev/null || true
 
-          # تشغيل السكريبت مع طباعة كامل التفاصيل سطر بسطر
+          # 4. ربط مجلد deps والمسارات داخل scripts لتطابق مسارات سكريبتاتك تماماً
+          ln -sfn "$CORE_DIR/deps" "$CORE_DIR/scripts/deps"
+          ln -sfn "$CORE_DIR/include" "$CORE_DIR/scripts/include" 2>/dev/null || true
+          ln -sfn "$CORE_DIR/sdk" "$CORE_DIR/scripts/sdk" 2>/dev/null || true
+
+          # 5. تشغيل البناء
           echo "==> Launching compilation process..."
           cd "$CORE_DIR/scripts"
           bash -x ./buildall.sh
