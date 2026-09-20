@@ -19,13 +19,16 @@
           echo "==> [4/7] Running FFmpeg Minimal Build..."
           bash "${SCRIPT_DIR}/build_minimal_ffmpeg.sh"
 
-          echo "==> [5/7] Building libplacebo..."
+          echo "==> [5/8] Building libplacebo (Static)..."
           bash "${SCRIPT_DIR}/build_libplacebo.sh"
 
-          echo "==> [6/7] Building MPV..."
+          echo "==> [6/8] Building libass & font stack (Static)..."
+          bash "${SCRIPT_DIR}/build_libass.sh"
+
+          echo "==> [7/8] Building MPV..."
           bash "${SCRIPT_DIR}/build_mpv.sh"
 
-          echo "==> [7/7] Building libplayer.so (JNI Bridge)..."
+          echo "==> [8/8] Building libplayer.so (JNI Bridge)..."
           bash "${SCRIPT_DIR}/build_player.sh"
 
           if command -v llvm-strip &> /dev/null; then
