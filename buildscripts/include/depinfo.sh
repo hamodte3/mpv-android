@@ -1,35 +1,21 @@
-#!/bin/bash -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-cd "$( dirname "${BASH_SOURCE[0]}" )/.."
-. ./include/depinfo.sh
+# مسارات بيئة العمل
+export API_LEVEL="24"
+export TARGET_ARCH="aarch64"
+export TARGET="aarch64-linux-android${API_LEVEL}"
 
-mkdir -p deps
-cd deps
-
-# 1. تحميل mbedtls
-if [ ! -d mbedtls ]; then
-    echo "==> Fetching mbedtls"
-    wget -qO- https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-${v_mbedtls}/mbedtls-${v_mbedtls}.tar.bz2 | tar -xjf -
-    mv mbedtls-${v_mbedtls} mbedtls
+# تحديد مسار الـ NDK وأداة المترجم
+if [ -z "${ANDROID_NDK_HOME:-}" ]; then
+    echo "ERROR: ANDROID_NDK_HOME is not set." >&2
+    exit 1
 fi
 
-# 2. استنساخ FFmpeg
-if [ ! -d ffmpeg ]; then
-    echo "==> Cloning ffmpeg"
-    git clone --depth 1 --branch ${v_ci_ffmpeg} https://github.com/FFmpeg/FFmpeg.git ffmpeg
-fi
+export NDK_LLVM="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64"
+export PATH="${NDK_LLVM}/bin:${PATH}"
 
-# 3. استنساخ libplacebo
-if [ ! -d libplacebo ]; then
-    echo "==> Cloning libplacebo"
-    git clone --depth 1 --recursive https://code.videolan.org/videolan/libplacebo.git libplacebo
-fi
-
-# 4. تحميل curl
-if [ ! -d curl ]; then
-    echo "==> Fetching curl"
-    wget -qO- https://curl.se/download/curl-${v_curl}.tar.xz | tar -xJf -
-    mv curl-${v_curl} curl
-fi
-
-echo "==> Dependencies downloaded successfully (Ultra-Lean)."
+# إصدارات المكتبات
+export v_mbedtls="3.6.7"
+export v_curl="8.21.0"
+export v_ffmpeg="n7.1" # يفضل استخدام وسم مستقر
