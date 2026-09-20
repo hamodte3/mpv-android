@@ -124,7 +124,7 @@ jobs:
           set -euo pipefail
           cd mpv-core
 
-          # 1. تحويل الموديول إلى Library وحذف خصائص الـ APK
+          # 1. تنظيف وإعادة ضبط app/build.gradle عبر بايثون
           python3 - << 'EOF'
           import re
 
@@ -157,11 +157,22 @@ jobs:
               while re.search(r'\b' + block + r'\b[^{]*\{', content):
                   content = remove_block(content, block)
 
-          build_config_fields = '''
-              buildConfigField "String", "VERSION_NAME", "\\"1.0.0\\""
-              buildConfigField "int", "VERSION_CODE", "1"
+          # حقن مسار jniLibs صراحة لضمان حزم ملفات .so داخل الـ AAR
+          custom_config = '''
+              sourceSets {
+                  main {
+                      jniLibs.srcDirs = ['src/main/jniLibs']
+                  }
+              }
+              defaultConfig {
+                  buildConfigField "String", "VERSION_NAME", "\\"1.0.0\\""
+                  buildConfigField "int", "VERSION_CODE", "1"
+                  ndk {
+                      abiFilters "arm64-v8a"
+                  }
+              }
           '''
-          content = re.sub(r'(defaultConfig\s*\{)', r'\1' + build_config_fields, content, count=1)
+          content = re.sub(r'(android\s*\{)', r'\1' + custom_config, content, count=1)
 
           with open(gradle_file, 'w') as f:
               f.write(content)
@@ -181,7 +192,7 @@ jobs:
               f.write(manifest)
           EOF
 
-          # 2. استبدال المتغيرات في AboutActivity.kt
+          # 2. تعديل AboutActivity.kt لتفادي خطأ المتغيرات
           ABOUT_FILE=$(find app/src/main/ -name "AboutActivity.kt" | head -n 1)
           if [ -n "$ABOUT_FILE" ] && [ -f "$ABOUT_FILE" ]; then
             sed -i '/import.*VERSION_NAME/d' "$ABOUT_FILE"
@@ -192,24 +203,31 @@ jobs:
             sed -i 's/\bVERSION_CODE\b/1/g' "$ABOUT_FILE"
           fi
 
-          # 3. حذف الـ symlink القديم وإنشاء مجلدات JNI حقيقية
-          rm -rf app/src/main/jniLibs app/src/main/libs
-          mkdir -p app/src/main/jniLibs/arm64-v8a app/src/main/libs/arm64-v8a
+          # 3. جمع كل ملفات .so المبنية ووضعها داخل مجلد arm64-v8a
+          rm -rf app/src/main/jniLibs app/libs
+          mkdir -p app/src/main/jniLibs/arm64-v8a
 
-          # نسخ المكتبات المبنية لمعمارية arm64
-          find buildscripts/prefix/arm64/lib/ -name "*.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \; 2>/dev/null || true
-          find buildscripts/ -name "libplayer.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \; 2>/dev/null || true
-          cp -r app/src/main/jniLibs/arm64-v8a/* app/src/main/libs/arm64-v8a/ 2>/dev/null || true
+          echo "==> Finding all built .so files:"
+          find buildscripts/ -name "*.so" -print
 
-          # 4. بناء الـ AAR عبر Gradle
+          # نسخ كافة ملفات .so المترجمة لمجلد jniLibs
+          find buildscripts/ -name "*.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \;
+
+          echo "==> Files ready for packaging in jniLibs/arm64-v8a:"
+          ls -lh app/src/main/jniLibs/arm64-v8a/
+
+          # 4. بناء الـ AAR
           chmod +x gradlew
           ./gradlew :app:assembleDefaultRelease -x lint -x test --no-daemon
 
-          # 5. استخراج الـ AAR النهائي
+          # 5. استخراج الـ AAR والتحقق من احتوائه على ملفات الـ .so
           mkdir -p ../dist
           find app/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} ../dist/mpv-android.aar \;
 
-          echo "==> Custom Minimal AAR Built Successfully:"
+          echo "==> Inspecting AAR contents:"
+          unzip -l ../dist/mpv-android.aar | grep -E '\.so$' || (echo "ERROR: No .so files found inside AAR!" && exit 1)
+
+          echo "==> Final Generated AAR size:"
           ls -lh ../dist/
 
       - name: Upload Minimal MPV AAR
