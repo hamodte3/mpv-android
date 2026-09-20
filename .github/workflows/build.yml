@@ -218,6 +218,7 @@ jobs:
 
           echo "==> Final Minimal AAR Size:"
           ls -lh ../dist/
+          
       - name: Upload Minimal MPV AAR
         uses: actions/upload-artifact@v4
         with:
