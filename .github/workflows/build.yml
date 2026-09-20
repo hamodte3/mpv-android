@@ -91,31 +91,32 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 1. تحويل الموديول من تطبيق إلى مكتبة أندرويد (Library AAR)
+          # 1. تحويل الموديول إلى Library وحذف الإعدادات الخاصة بالتطبيقات فقط
           for f in app/build.gradle app/build.gradle.kts; do
             if [ -f "$f" ]; then
               sed -i 's/com\.android\.application/com.android.library/g' "$f"
               sed -i '/applicationId/d' "$f"
+              sed -i '/shrinkResources/d' "$f"
+              sed -i '/signingConfig/d' "$f"
             fi
           done
 
-          # 2. تنظيف الـ Manifest لمنع أي تعارض أسماء مع تطبيقك الأساسي
+          # 2. تنظيف الـ Manifest لمنع تعارضات الخصائص
           sed -i '/android:icon=/d' app/src/main/AndroidManifest.xml || true
           sed -i '/android:roundIcon=/d' app/src/main/AndroidManifest.xml || true
           sed -i '/android:label=/d' app/src/main/AndroidManifest.xml || true
           sed -i '/android:theme=/d' app/src/main/AndroidManifest.xml || true
 
-          # 3. بناء ملف الـ AAR عبر Gradle
+          # 3. بناء ملف الـ AAR
           chmod +x gradlew
           ./gradlew assembleRelease -x lint -x test --no-daemon
 
-          # 4. تجهيز ملف الـ AAR للتحميل
+          # 4. نسخ ملف الـ AAR الناتج إلى مجلد dist
           mkdir -p dist
           find app/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} dist/mpv-android.aar \;
 
           echo "==> Final Generated AAR:"
           ls -lh dist/
-
       - name: Upload MPV AAR
         uses: actions/upload-artifact@v4
         with:
