@@ -63,7 +63,7 @@ FFMPEG_MINIMAL_FLAGS=(
 "${FFMPEG_SRC}/configure" "${FFMPEG_MINIMAL_FLAGS[@]}" \
   --extra-cflags="${SAFE_CFLAGS}" \
   --extra-ldflags="${SAFE_LDFLAGS}" \
-  --extra-libs="-Wl,--whole-archive -lmbedtls -lmbedx509 -lmbedcrypto -Wl,--no-whole-archive"
+  --extra-libs="-lmbedtls -lmbedx509 -lmbedcrypto -pthread"
   
 make -j"$(nproc)"
 make install
