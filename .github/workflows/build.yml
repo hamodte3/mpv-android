@@ -290,28 +290,6 @@ jobs:
             -Dauto_features=disabled \
             -Drequire-system-font-provider=false
           ninja -C "${ASS_BUILD}" -j$(nproc) install
-          else
-            cd "${ASS_SRC}"
-            [ -f ./configure ] || ./autogen.sh
-            mkdir -p "${ASS_BUILD}" && cd "${ASS_BUILD}"
-            "${ASS_SRC}/configure" \
-              --host="${TARGET}" \
-              --prefix="${PREFIX}" \
-              --libdir="${PREFIX}/lib" \
-              --disable-shared \
-              --enable-static \
-              --disable-fontconfig \
-              --disable-require-system-font-provider \
-              CC="${NDK_LLVM}/bin/${TARGET}-clang" \
-              CXX="${NDK_LLVM}/bin/${TARGET}-clang++" \
-              AR="${NDK_LLVM}/bin/llvm-ar" \
-              RANLIB="${NDK_LLVM}/bin/llvm-ranlib" \
-              CFLAGS="-Os -flto -fPIC -I${PREFIX}/include" \
-              LDFLAGS="-L${PREFIX}/lib" \
-              PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PREFIX}/lib64/pkgconfig"
-            make -j$(nproc)
-            make install
-          fi
 
           echo "==> Font & ASS stack installed successfully into prefix!"
           EOF
