@@ -1,25 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PATH="${HOME}/.local/bin:${PATH}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-. "${SCRIPT_DIR}/depinfo.sh"
 
-echo "==> [1/4] Cleaning build artifacts..."
+echo "==> [1/6] Cleaning old build & prefix artifacts..."
 rm -rf "${SCRIPT_DIR}/build" "${SCRIPT_DIR}/prefix"
 
-echo "==> [2/4] Setting Global Optimization Flags..."
-export EXTRA_CFLAGS="-Os -flto -ffunction-sections -fdata-sections -fmerge-all-constants"
-# دمج خريطة الرموز وحماية التوافق مع 16KB Page Size
-export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384 -Wl,--version-script=${SCRIPT_DIR}/mpv.map"
+echo "==> [2/6] Building mbedTLS (HTTPS backend)..."
+bash "${SCRIPT_DIR}/build_mbedtls.sh"
 
-echo "==> [3/4] Building FFmpeg..."
+echo "==> [3/6] Running FFmpeg Minimal Build..."
 bash "${SCRIPT_DIR}/build_minimal_ffmpeg.sh"
 
-echo "==> [4/4] Building MPV..."
+echo "==> [4/6] Building libmpv..."
 bash "${SCRIPT_DIR}/build_mpv.sh"
 
-# تجريد المقاطع غير اللازمة
-echo "==> Post-Processing: Stripping .comment sections..."
-find "${SCRIPT_DIR}/prefix/lib" -name "*.so" -exec "${NDK_LLVM}/bin/llvm-strip" --strip-debug --strip-unneeded -R .comment -R .note.gnu.gold-version {} + 2>/dev/null || true
+echo "==> [5/6] Building libplayer.so (Android JNI Bridge)..."
+bash "${SCRIPT_DIR}/build_player.sh"
 
-echo "==> Build finished successfully! Output libraries in: ${SCRIPT_DIR}/prefix/lib"
+echo "==> [6/6] Stripping binaries..."
+if command -v llvm-strip &> /dev/null; then
+  find "${SCRIPT_DIR}/prefix/lib" -name "*.so" -exec llvm-strip --strip-unneeded -R .comment {} + 2>/dev/null || true
+fi
+
+echo "==> Complete! Ultra-lean NDK Build Finished Successfully."
