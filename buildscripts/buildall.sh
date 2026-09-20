@@ -7,8 +7,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "==> [1/6] Cleaning old build & prefix artifacts..."
 rm -rf "${SCRIPT_DIR}/build" "${SCRIPT_DIR}/prefix"
 
-echo "==> [2/6] Building mbedTLS (HTTPS backend)..."
-bash "${SCRIPT_DIR}/build_mbedtls.sh"
+echo "==> [2/5] Setting Global Size & Linker Optimization Flags..."
+export EXTRA_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections -fmerge-all-constants"
+export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384"
 
 echo "==> [3/6] Running FFmpeg Minimal Build..."
 bash "${SCRIPT_DIR}/build_minimal_ffmpeg.sh"
