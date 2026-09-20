@@ -71,22 +71,27 @@ jobs:
           set -euo pipefail
           cd buildscripts
 
-          # 1. تنزيل الاعتماديات
+          # 1. تحويل مسار freetype إلى مرآة GitHub الرسمية لتفادي سيرفر freedesktop الساقط
+          git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype.git"
+          git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype"
+          find . -type f \( -name "*.sh" -o -name "*.cfg" \) -exec sed -i 's|https://gitlab.freedesktop.org/freetype/freetype.git|https://github.com/freetype/freetype.git|g' {} + 2>/dev/null || true
+
+          # 2. تنزيل الاعتماديات بعد تصحيح الرابط
           ./download.sh
 
-          # 2. إزالة قيود إصدار Meson الصارمة من ملفات البناء (تجاوز خطأ fontconfig وغيره)
+          # 3. إزالة قيود إصدار Meson الصارمة من ملفات البناء (تجاوز خطأ fontconfig وغيره)
           find deps/ -name "meson.build" -exec sed -i "s/meson_version : '>= [0-9.]*'/meson_version : '>= 0.60.0'/g" {} + 2>/dev/null || true
 
-          # 3. فرض التحسين ومحاذاة 16KB
+          # 4. فرض التحسين ومحاذاة 16KB
           export EXTRA_CFLAGS="-Os -flto -ffunction-sections -fdata-sections"
           export EXTRA_LDFLAGS="-Wl,--gc-sections -flto -Wl,-z,max-page-size=16384 -static-libstdc++"
 
-          # 4. بناء مكتبات الـ native لمعمارية arm64
+          # 5. بناء مكتبات الـ native لمعمارية arm64
           ./buildall.sh --arch arm64
 
-          # 5. تجريد الرموز الزائدة لتقليل الحجم لأقصى درجة
+          # 6. تجريد الرموز الزائدة لتقليل الحجم
           find prefix/arm64/ -name "*.so" -exec llvm-strip --strip-unneeded -R .comment {} + 2>/dev/null || true
-
+          
       - name: Assemble Release AAR
         run: |
           set -euo pipefail
