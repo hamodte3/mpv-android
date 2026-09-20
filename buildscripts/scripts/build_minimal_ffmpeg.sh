@@ -11,6 +11,9 @@ FFMPEG_SRC="${SCRIPT_DIR}/deps/ffmpeg"
 mkdir -p "${BUILD_DIR}" "${PREFIX}"
 cd "${BUILD_DIR}"
 
+# تصدير مسار pkgconfig ليتعرف configure على mbedtls تلقائياً
+export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+
 SAFE_CFLAGS="${EXTRA_CFLAGS:-} -I${PREFIX}/include -fvisibility=default"
 SAFE_LDFLAGS="${EXTRA_LDFLAGS:-} -L${PREFIX}/lib"
 
@@ -52,6 +55,7 @@ FFMPEG_MINIMAL_FLAGS=(
   --enable-parser=h264,hevc,av1,vp9,aac,mpegaudio
   --enable-demuxer=mov,matroska,flv,hls,dash,aac,mp3,mpegts
   --enable-protocol=file,http,https,tcp,udp,hls,tls
+  --enable-mbedtls
 )
 
 "${FFMPEG_SRC}/configure" "${FFMPEG_MINIMAL_FLAGS[@]}" \
