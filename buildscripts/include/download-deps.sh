@@ -1,4 +1,36 @@
-#!/bin/bash -e
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${SCRIPT_DIR}/depinfo.sh"
+
+DEPS_DIR="${SCRIPT_DIR}/deps"
+mkdir -p "${DEPS_DIR}"
+cd "${DEPS_DIR}"
+
+WGET="wget -q --show-progress"
+
+# 1. mbedtls (ضروري لدعم HTTPS/TLS في الشبكة)
+if [ ! -d mbedtls ]; then
+    echo "==> Downloading mbedtls..."
+    mkdir -p mbedtls
+    ${WGET} "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-${v_mbedtls}/mbedtls-${v_mbedtls}.tar.bz2" -O - | \
+        tar -xj -C mbedtls --strip-components=1
+fi
+
+# 2. FFmpeg
+if [ ! -d ffmpeg ]; then
+    echo "==> Cloning FFmpeg (${v_ffmpeg})..."
+    git clone --depth 1 -b "${v_ffmpeg}" https://github.com/FFmpeg/FFmpeg.git ffmpeg
+fi
+
+# 3. MPV
+if [ ! -d mpv ]; then
+    echo "==> Cloning MPV..."
+    git clone --depth 1 https://github.com/mpv-player/mpv.git mpv
+fi
+
+echo "==> All dependencies downloaded."#!/bin/bash -e
 
 # تحديد المسار بدقة لمنع تضارب مجلدات العمل والـ Segfault
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
