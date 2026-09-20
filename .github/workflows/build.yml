@@ -96,7 +96,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 1. تنظيف app/build.gradle والمانيفست عبر بايثون لحذف بلوكات الـ APK المتعارضة
+          # 1. تنظيف app/build.gradle والمانيفست عبر بايثون
           python3 - << 'EOF'
           import re
 
@@ -130,10 +130,17 @@ jobs:
               while re.search(r'\b' + block + r'\b[^{]*\{', content):
                   content = remove_block(content, block)
 
+          # حقن حقول الإصدار داخل defaultConfig للمكتبة
+          build_config_fields = '''
+              buildConfigField "String", "VERSION_NAME", "\\"1.0.0\\""
+              buildConfigField "int", "VERSION_CODE", "1"
+          '''
+          content = re.sub(r'(defaultConfig\s*\{)', r'\1' + build_config_fields, content, count=1)
+
           with open(gradle_file, 'w') as f:
               f.write(content)
 
-          # تنظيف المانيفست لمنع ظهور أيقونة تشغيل ثانية أو تعارضات
+          # تنظيف المانيفست
           manifest_file = 'app/src/main/AndroidManifest.xml'
           with open(manifest_file, 'r') as f:
               manifest = f.read()
@@ -149,17 +156,28 @@ jobs:
               f.write(manifest)
           EOF
 
-          # 2. ضمان وجود كل ملفات الـ .so داخل مسارات الـ JNI للمكتبة
+          # 2. استبدال طلب VERSION_NAME و VERSION_CODE في كود Kotlin مباشرة
+          ABOUT_FILE=$(find app/src/main/ -name "AboutActivity.kt" | head -n 1)
+          if [ -n "$ABOUT_FILE" ] && [ -f "$ABOUT_FILE" ]; then
+            sed -i '/import.*VERSION_NAME/d' "$ABOUT_FILE"
+            sed -i '/import.*VERSION_CODE/d' "$ABOUT_FILE"
+            sed -i 's/BuildConfig\.VERSION_NAME/"1.0.0"/g' "$ABOUT_FILE"
+            sed -i 's/BuildConfig\.VERSION_CODE/1/g' "$ABOUT_FILE"
+            sed -i 's/\bVERSION_NAME\b/"1.0.0"/g' "$ABOUT_FILE"
+            sed -i 's/\bVERSION_CODE\b/1/g' "$ABOUT_FILE"
+          fi
+
+          # 3. نسخ كل ملفات .so المبنية لمعمارية arm64 إلى jniLibs
           mkdir -p app/src/main/jniLibs/arm64-v8a app/src/main/libs/arm64-v8a
           find buildscripts/prefix/arm64/lib/ -name "*.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \; 2>/dev/null || true
           find buildscripts/ -name "libplayer.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \; 2>/dev/null || true
           cp -r app/src/main/jniLibs/* app/src/main/libs/ 2>/dev/null || true
 
-          # 3. بناء ملف الـ AAR
+          # 4. تجميع الـ AAR الأساسي (Default Release)
           chmod +x gradlew
-          ./gradlew assembleRelease -x lint -x test --no-daemon
+          ./gradlew :app:assembleDefaultRelease -x lint -x test --no-daemon
 
-          # 4. نقل ملف الـ AAR الناتج إلى مجلد dist
+          # 5. نقل واستخراج ملف الـ AAR الناتج
           mkdir -p dist
           find app/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} dist/mpv-android.aar \;
 
