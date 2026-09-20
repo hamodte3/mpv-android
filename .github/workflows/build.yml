@@ -82,49 +82,37 @@ jobs:
           USER_DIR="$GITHUB_WORKSPACE/user-repo"
           CORE_DIR="$GITHUB_WORKSPACE/mpv-core/buildscripts"
 
-          echo "==> Injecting your custom scripts..."
+          echo "==> Syncing scripts into buildscripts/scripts/..."
+          # نسخ الملفات الأربعة إلى مسار scripts في mpv-core
+          mkdir -p "$CORE_DIR/scripts"
+          find "$USER_DIR" -type f \( -name "buildall.sh" -o -name "buildall" -o -name "build_minimal_ffmpeg.sh" -o -name "build_mpv.sh" -o -name "mpv.map" \) -exec cp -v {} "$CORE_DIR/scripts/" \;
 
-          # نسخ سكريبت FFmpeg المخصص بالاسمين لضمان استدعائه حتماً
-          find "$USER_DIR" -name "build_minimal_ffmpeg.sh" -exec cp -v {} "$CORE_DIR/scripts/build_minimal_ffmpeg.sh" \;
-          find "$USER_DIR" -name "build_minimal_ffmpeg.sh" -exec cp -v {} "$CORE_DIR/scripts/ffmpeg.sh" \;
+          # توحيد الاسم إلى buildall.sh ومنح الصلاحيات
+          if [ -f "$CORE_DIR/scripts/buildall" ]; then
+            mv -v "$CORE_DIR/scripts/buildall" "$CORE_DIR/scripts/buildall.sh"
+          fi
+          chmod +x "$CORE_DIR"/scripts/*.sh "$CORE_DIR"/*.sh 2>/dev/null || true
 
-          # نسخ سكريبت MPV المخصص بالاسمين
-          find "$USER_DIR" -name "build_mpv.sh" -exec cp -v {} "$CORE_DIR/scripts/build_mpv.sh" \;
-          find "$USER_DIR" -name "build_mpv.sh" -exec cp -v {} "$CORE_DIR/scripts/mpv.sh" \;
-
-          # نسخ خريطة الرموز mpv.map
-          find "$USER_DIR" -name "mpv.map" -exec cp -v {} "$CORE_DIR/scripts/mpv.map" \;
-          find "$USER_DIR" -name "mpv.map" -exec cp -v {} "$CORE_DIR/mpv.map" \;
-
-          # نسخ buildall.sh للجذر ولمجلد scripts
-          find "$USER_DIR" -name "buildall.sh" -exec cp -v {} "$CORE_DIR/buildall.sh" \;
-          find "$USER_DIR" -name "buildall.sh" -exec cp -v {} "$CORE_DIR/scripts/buildall.sh" \;
-
-          chmod +x "$CORE_DIR"/*.sh "$CORE_DIR"/scripts/*.sh
-
+          # تنزيل الاعتماديات الرسمية أولاً
           cd "$CORE_DIR"
-
-          # تفادي سيرفر freedesktop المتوقف
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype.git"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype"
           find . -type f \( -name "*.sh" -o -name "*.cfg" \) -exec sed -i 's|https://gitlab.freedesktop.org/freetype/freetype.git|https://github.com/freetype/freetype.git|g' {} + 2>/dev/null || true
 
           ./download.sh
-
           find deps/ -name "meson.build" -exec sed -i "s/meson_version : '>= [0-9.]*'/meson_version : '>= 0.60.0'/g" {} + 2>/dev/null || true
 
-          export EXTRA_CFLAGS="-Os -flto -ffunction-sections -fdata-sections"
-          export EXTRA_LDFLAGS="-Wl,--gc-sections -flto -Wl,-z,max-page-size=16384 -static-libstdc++"
-
-          echo "==> Running compilation..."
-          ./buildall.sh --arch arm64
+          # تشغيل buildall.sh من داخل مجلد scripts لضمان مطابقة SCRIPT_DIR
+          echo "==> Running custom buildall.sh from scripts/..."
+          cd "$CORE_DIR/scripts"
+          ./buildall.sh
 
       - name: Assemble Release AAR
         run: |
           set -euo pipefail
           cd mpv-core
 
-          # 1. تنظيف app/build.gradle والمانيفست عبر بايثون
+          # 1. تحويل الموديول إلى Library وحذف خصائص التطبيق
           python3 - << 'EOF'
           import re
 
@@ -202,34 +190,31 @@ jobs:
             sed -i 's/\bVERSION_CODE\b/1/g' "$ABOUT_FILE"
           fi
 
-          # 3. استكشاف ونسخ ملفات .so الناتجة مع فك الروابط الرمزية (Follow Symlinks)
+          # 3. جلب ملفات .so الصافية الناتجة من البناء
           rm -rf app/src/main/jniLibs app/libs
           mkdir -p app/src/main/jniLibs/arm64-v8a
 
-          echo "==> All .so files found in project:"
-          find "$GITHUB_WORKSPACE" -name "*.so*" -not -path "*/.git/*"
+          echo "==> Searching for built libmpv.so..."
+          # البحث في prefix وفك الروابط الرمزية لحزم الملف الحقيقي
+          find buildscripts/ -type f -name "libmpv.so*" -exec cp -v -aL {} app/src/main/jniLibs/arm64-v8a/libmpv.so \;
+          find buildscripts/ -type f -name "libplayer.so" -exec cp -v -aL {} app/src/main/jniLibs/arm64-v8a/libplayer.so \; 2>/dev/null || true
 
-          # نسخ libmpv.so وفك الروابط الرمزية ليُنسخ كملف حقيقي
-          find "$GITHUB_WORKSPACE" -name "libmpv.so*" -exec cp -v -aL {} app/src/main/jniLibs/arm64-v8a/libmpv.so \; 2>/dev/null || true
-          find "$GITHUB_WORKSPACE" -name "libplayer.so" -exec cp -v -aL {} app/src/main/jniLibs/arm64-v8a/libplayer.so \; 2>/dev/null || true
-
-          # تجريد المكتبات لتقليص الحجم للحد الأدنى الصافي
-          echo "==> Stripping symbols..."
+          # تجريد نهائي للرموز
           find app/src/main/jniLibs/arm64-v8a/ -name "*.so" -exec "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all -R .comment -R .note {} + 2>/dev/null || true
 
-          echo "==> Prepared native libraries in jniLibs:"
+          echo "==> Packaged native libraries:"
           ls -lh app/src/main/jniLibs/arm64-v8a/
 
           # 4. بناء الـ AAR عبر Gradle
           chmod +x gradlew
           ./gradlew :app:assembleDefaultRelease -x lint -x test --no-daemon
 
-          # 5. استخراج الـ AAR والتحقق من المحتوى
+          # 5. استخراج الـ AAR والتحقق من احتوائه على المكتبة
           mkdir -p ../dist
           find app/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} ../dist/mpv-android.aar \;
 
-          echo "==> Inspecting AAR contents:"
-          unzip -l ../dist/mpv-android.aar
+          echo "==> Verifying AAR Contents:"
+          unzip -l ../dist/mpv-android.aar | grep -E '\.so$'
 
           echo "==> Final Minimal AAR Size:"
           ls -lh ../dist/
