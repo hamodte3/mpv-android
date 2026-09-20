@@ -53,6 +53,7 @@ MESON_ARGS=(
   "-Dmanpage-build=disabled"
   "-Dhtml-build=disabled"
   "-Dtests=false"
+  "-Dencoding=disabled"
 )
 
 echo "==> Configuring Minimal MPV with Meson..."
