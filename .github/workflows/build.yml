@@ -96,15 +96,75 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 1. تحويل الموديول إلى Library وحذف الإعدادات الخاصة بالتطبيقات فقط
-          for f in app/build.gradle app/build.gradle.kts; do
-            if [ -f "$f" ]; then
-              sed -i 's/com\.android\.application/com.android.library/g' "$f"
-              sed -i '/applicationId/d' "$f"
-              sed -i '/shrinkResources/d' "$f"
-              sed -i '/signingConfig/d' "$f"
-            fi
-          done
+          # 1. تنظيف app/build.gradle والمانيفست عبر بايثون لحذف بلوكات الـ APK المتعارضة
+          python3 - << 'EOF'
+          import re
+
+          def remove_block(text, block_name):
+              match = re.search(r'\b' + block_name + r'\b[^{]*\{', text)
+              if not match:
+                  return text
+              start = match.end() - 1
+              idx = match.start()
+              depth = 1
+              i = start + 1
+              while i < len(text) and depth > 0:
+                  if text[i] == '{':
+                      depth += 1
+                  elif text[i] == '}':
+                      depth -= 1
+                  i += 1
+              return text[:idx] + text[i:]
+
+          gradle_file = 'app/build.gradle'
+          with open(gradle_file, 'r') as f:
+              content = f.read()
+
+          content = content.replace("com.android.application", "com.android.library")
+          content = re.sub(r'applicationId\s+.*', '', content)
+          content = re.sub(r'shrinkResources\s+.*', '', content)
+          content = re.sub(r'signingConfig\s+.*', '', content)
+
+          # إزالة البلوكات الخاصة بالتطبيقات فقط
+          for block in ['androidComponents', 'applicationVariants', 'signingConfigs', 'splits', 'bundle']:
+              while re.search(r'\b' + block + r'\b[^{]*\{', content):
+                  content = remove_block(content, block)
+
+          with open(gradle_file, 'w') as f:
+              f.write(content)
+
+          # تنظيف المانيفست لمنع ظهور أيقونة تشغيل ثانية أو تعارضات
+          manifest_file = 'app/src/main/AndroidManifest.xml'
+          with open(manifest_file, 'r') as f:
+              manifest = f.read()
+
+          manifest = manifest.replace('<category android:name="android.intent.category.LAUNCHER" />', '')
+          manifest = manifest.replace('<category android:name="android.intent.category.LAUNCHER"/>', '')
+          manifest = re.sub(r'android:icon="[^"]*"', '', manifest)
+          manifest = re.sub(r'android:roundIcon="[^"]*"', '', manifest)
+          manifest = re.sub(r'android:label="[^"]*"', '', manifest)
+          manifest = re.sub(r'android:theme="[^"]*"', '', manifest)
+
+          with open(manifest_file, 'w') as f:
+              f.write(manifest)
+          EOF
+
+          # 2. ضمان وجود كل ملفات الـ .so داخل مسارات الـ JNI للمكتبة
+          mkdir -p app/src/main/jniLibs/arm64-v8a app/src/main/libs/arm64-v8a
+          find buildscripts/prefix/arm64/lib/ -name "*.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \; 2>/dev/null || true
+          find buildscripts/ -name "libplayer.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \; 2>/dev/null || true
+          cp -r app/src/main/jniLibs/* app/src/main/libs/ 2>/dev/null || true
+
+          # 3. بناء ملف الـ AAR
+          chmod +x gradlew
+          ./gradlew assembleRelease -x lint -x test --no-daemon
+
+          # 4. نقل ملف الـ AAR الناتج إلى مجلد dist
+          mkdir -p dist
+          find app/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} dist/mpv-android.aar \;
+
+          echo "==> Final Generated AAR:"
+          ls -lh dist/
 
           # 2. تنظيف الـ Manifest لمنع تعارضات الخصائص
           sed -i '/android:icon=/d' app/src/main/AndroidManifest.xml || true
