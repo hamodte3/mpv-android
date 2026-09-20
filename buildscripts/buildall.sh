@@ -1,32 +1,25 @@
-cat << 'EOF' > buildall
 #!/usr/bin/env bash
 set -euo pipefail
 
-export PATH="${HOME}/.local/bin:${PATH}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${SCRIPT_DIR}/depinfo.sh"
 
-echo "==> [1/5] Cleaning old build & prefix artifacts..."
+echo "==> [1/4] Cleaning build artifacts..."
 rm -rf "${SCRIPT_DIR}/build" "${SCRIPT_DIR}/prefix"
 
-echo "==> [2/5] Setting Global Size & Linker Optimization Flags..."
-export EXTRA_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections -fmerge-all-constants"
+echo "==> [2/4] Setting Global Optimization Flags..."
+export EXTRA_CFLAGS="-Os -flto -ffunction-sections -fdata-sections -fmerge-all-constants"
+# دمج خريطة الرموز وحماية التوافق مع 16KB Page Size
 export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384 -Wl,--version-script=${SCRIPT_DIR}/mpv.map"
 
-echo "==> [3/5] Running FFmpeg Minimal Build..."
-if [ -f "${SCRIPT_DIR}/build_minimal_ffmpeg.sh" ]; then
-  bash "${SCRIPT_DIR}/build_minimal_ffmpeg.sh"
-fi
+echo "==> [3/4] Building FFmpeg..."
+bash "${SCRIPT_DIR}/build_minimal_ffmpeg.sh"
 
-echo "==> [4/5] Building MPV..."
-if [ -f "${SCRIPT_DIR}/build_mpv.sh" ]; then
-  bash "${SCRIPT_DIR}/build_mpv.sh"
-fi
+echo "==> [4/4] Building MPV..."
+bash "${SCRIPT_DIR}/build_mpv.sh"
 
-echo "==> [5/5] Post-Processing: Stripping .comment notes..."
-if command -v llvm-strip &> /dev/null; then
-  find "${SCRIPT_DIR}/prefix" -name "*.so" -exec llvm-strip --strip-debug --strip-unneeded -R .comment {} + 2>/dev/null || true
-  echo "==> Stripped .comment notes using llvm-strip."
-fi
+# تجريد المقاطع غير اللازمة
+echo "==> Post-Processing: Stripping .comment sections..."
+find "${SCRIPT_DIR}/prefix/lib" -name "*.so" -exec "${NDK_LLVM}/bin/llvm-strip" --strip-debug --strip-unneeded -R .comment -R .note.gnu.gold-version {} + 2>/dev/null || true
 
-echo "==> Complete! Optimized NDK Build Finished Successfully."
-EOF
+echo "==> Build finished successfully! Output libraries in: ${SCRIPT_DIR}/prefix/lib"
