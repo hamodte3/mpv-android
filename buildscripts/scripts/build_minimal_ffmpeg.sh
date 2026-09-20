@@ -15,7 +15,7 @@ cd "${BUILD_DIR}"
 export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
 SAFE_CFLAGS="${EXTRA_CFLAGS:-} -I${PREFIX}/include -fvisibility=default"
-SAFE_LDFLAGS="${EXTRA_LDFLAGS:-} -L${PREFIX}/lib"
+SAFE_LDFLAGS="-Wl,-z,max-page-size=16384 -Wl,--gc-sections -L${PREFIX}/lib"
 
 FFMPEG_MINIMAL_FLAGS=(
   --target-os=android
