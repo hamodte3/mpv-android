@@ -84,10 +84,10 @@ jobs:
 
           mkdir -p "$CORE_DIR/scripts"
 
-          # 1. نسخ كافة السكربتات وملفات الـ map من مستودعك
+          # 1. نسخ السكربتات المخصصة
           find "$USER_DIR" -type f \( -name "*.sh" -o -name "mpv.map" \) -exec cp -v {} "$CORE_DIR/scripts/" \;
 
-          # 2. إنشاء / التأكد من وجود depinfo.sh بالمتغيرات المطلوبة للـ NDK
+          # 2. ملف البيئة depinfo.sh
           cat << 'EOF' > "$CORE_DIR/scripts/depinfo.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -102,7 +102,36 @@ jobs:
           fi
           EOF
 
-          # 3. توحيد وإعداد buildall.sh
+          # 3. سكربت بناء mbedtls للتشفير
+          cat << 'EOF' > "$CORE_DIR/scripts/build_mbedtls.sh"
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          PREFIX="${SCRIPT_DIR}/prefix"
+          BUILD_DIR="${SCRIPT_DIR}/build/mbedtls"
+          SRC_DIR="${SCRIPT_DIR}/deps/mbedtls"
+          [ -d "${SRC_DIR}" ] || SRC_DIR="${SCRIPT_DIR}/../deps/mbedtls"
+
+          echo "==> Building mbedtls for HTTPS..."
+          mkdir -p "${BUILD_DIR}" "${PREFIX}"
+
+          cmake -B "${BUILD_DIR}" -S "${SRC_DIR}" \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
+            -DENABLE_TESTING=OFF \
+            -DENABLE_PROGRAMS=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS="-Os -flto -fPIC -Wl,-z,max-page-size=16384"
+
+          ninja -C "${BUILD_DIR}" install
+          echo "==> mbedtls installed successfully in prefix."
+          EOF
+
+          # 4. سكربت buildall.sh مع استدعاء mbedtls أولاً
           cat << 'EOF' > "$CORE_DIR/scripts/buildall.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -113,37 +142,29 @@ jobs:
           echo "==> [1/5] Cleaning old build & prefix artifacts..."
           rm -rf "${SCRIPT_DIR}/build" "${SCRIPT_DIR}/prefix"
 
-          echo "==> [2/5] Setting Global Size & Linker Optimization Flags..."
+          echo "==> [2/5] Building mbedtls (HTTPS support)..."
+          bash "${SCRIPT_DIR}/build_mbedtls.sh"
+
+          echo "==> [3/5] Setting Global Flags..."
           export EXTRA_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections -fmerge-all-constants"
-          export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384 -Wl,--version-script=${SCRIPT_DIR}/mpv.map"
+          export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384"
 
-          echo "==> [3/5] Running FFmpeg Minimal Build..."
-          if [ -f "${SCRIPT_DIR}/build_minimal_ffmpeg.sh" ]; then
-            bash "${SCRIPT_DIR}/build_minimal_ffmpeg.sh"
-          else
-            echo "ERROR: build_minimal_ffmpeg.sh not found!"
-            exit 1
-          fi
+          echo "==> [4/5] Running FFmpeg Minimal Build..."
+          bash "${SCRIPT_DIR}/build_minimal_ffmpeg.sh"
 
-          echo "==> [4/5] Building MPV..."
-          if [ -f "${SCRIPT_DIR}/build_mpv.sh" ]; then
-            bash "${SCRIPT_DIR}/build_mpv.sh"
-          else
-            echo "ERROR: build_mpv.sh not found!"
-            exit 1
-          fi
+          echo "==> [5/5] Building MPV..."
+          bash "${SCRIPT_DIR}/build_mpv.sh"
 
-          echo "==> [5/5] Post-Processing: Stripping binaries..."
           if command -v llvm-strip &> /dev/null; then
             find "${SCRIPT_DIR}/prefix" -name "*.so" -exec llvm-strip --strip-debug --strip-unneeded -R .comment {} + 2>/dev/null || true
           fi
 
-          echo "==> Complete! Optimized NDK Build Finished Successfully."
+          echo "==> Complete! Native Build Finished Successfully."
           EOF
 
           chmod +x "$CORE_DIR"/scripts/*.sh "$CORE_DIR"/*.sh
 
-          # 4. تنزيل الاعتماديات
+          # 5. تنزيل الاعتماديات وربط المسارات
           cd "$CORE_DIR"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype.git"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype"
@@ -152,15 +173,14 @@ jobs:
           ./download.sh
           find deps/ -name "meson.build" -exec sed -i "s/meson_version : '>= [0-9.]*'/meson_version : '>= 0.60.0'/g" {} + 2>/dev/null || true
 
-          # 5. ربط المسارات المطلوبة داخل scripts/
           ln -sfn "$CORE_DIR/deps" "$CORE_DIR/scripts/deps"
           ln -sfn "$CORE_DIR/include" "$CORE_DIR/scripts/include" 2>/dev/null || true
           ln -sfn "$CORE_DIR/sdk" "$CORE_DIR/scripts/sdk" 2>/dev/null || true
 
-          # 6. تشغيل البناء الفعلي
           echo "==> Launching compilation process..."
           cd "$CORE_DIR/scripts"
           bash -x ./buildall.sh
+          
       - name: Assemble Release AAR
         run: |
           set -euo pipefail
