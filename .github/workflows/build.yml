@@ -124,7 +124,7 @@ jobs:
           set -euo pipefail
           cd mpv-core
 
-          # 1. تحويل الموديول إلى Library وحذف خصائص الـ APK
+          # 1. تنظيف app/build.gradle والمانيفست عبر بايثون
           python3 - << 'EOF'
           import re
 
@@ -191,7 +191,7 @@ jobs:
               f.write(manifest)
           EOF
 
-          # 2. تعديل AboutActivity.kt لتفادي أخطاء الرموز المفقودة
+          # 2. تعديل AboutActivity.kt
           ABOUT_FILE=$(find app/src/main/ -name "AboutActivity.kt" | head -n 1)
           if [ -n "$ABOUT_FILE" ] && [ -f "$ABOUT_FILE" ]; then
             sed -i '/import.*VERSION_NAME/d' "$ABOUT_FILE"
@@ -202,35 +202,37 @@ jobs:
             sed -i 's/\bVERSION_CODE\b/1/g' "$ABOUT_FILE"
           fi
 
-          # 3. استخراج libmpv.so و libplayer.so فقط وتجاهل ملفات الوسائط المؤقتة
+          # 3. استكشاف ونسخ ملفات .so الناتجة مع فك الروابط الرمزية (Follow Symlinks)
           rm -rf app/src/main/jniLibs app/libs
           mkdir -p app/src/main/jniLibs/arm64-v8a
 
-          echo "==> Locating built libraries..."
-          find buildscripts/ -type f -name "libmpv.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \;
-          find buildscripts/ -type f -name "libplayer.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \; 2>/dev/null || true
+          echo "==> All .so files found in project:"
+          find "$GITHUB_WORKSPACE" -name "*.so*" -not -path "*/.git/*"
 
-          # تجريد المكتبات من رموز الـ Debug لتقليص الحجم للحد الأدنى الصافي
+          # نسخ libmpv.so وفك الروابط الرمزية ليُنسخ كملف حقيقي
+          find "$GITHUB_WORKSPACE" -name "libmpv.so*" -exec cp -v -aL {} app/src/main/jniLibs/arm64-v8a/libmpv.so \; 2>/dev/null || true
+          find "$GITHUB_WORKSPACE" -name "libplayer.so" -exec cp -v -aL {} app/src/main/jniLibs/arm64-v8a/libplayer.so \; 2>/dev/null || true
+
+          # تجريد المكتبات لتقليص الحجم للحد الأدنى الصافي
           echo "==> Stripping symbols..."
-          find app/src/main/jniLibs/arm64-v8a/ -name "*.so" -exec "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all -R .comment -R .note {} +
+          find app/src/main/jniLibs/arm64-v8a/ -name "*.so" -exec "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all -R .comment -R .note {} + 2>/dev/null || true
 
-          echo "==> Final native libraries:"
+          echo "==> Prepared native libraries in jniLibs:"
           ls -lh app/src/main/jniLibs/arm64-v8a/
 
           # 4. بناء الـ AAR عبر Gradle
           chmod +x gradlew
           ./gradlew :app:assembleDefaultRelease -x lint -x test --no-daemon
 
-          # 5. استخراج الـ AAR النهائي وفحص محتوياته
+          # 5. استخراج الـ AAR والتحقق من المحتوى
           mkdir -p ../dist
           find app/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} ../dist/mpv-android.aar \;
 
-          echo "==> AAR Native Contents:"
-          unzip -l ../dist/mpv-android.aar | grep -E '\.so$'
+          echo "==> Inspecting AAR contents:"
+          unzip -l ../dist/mpv-android.aar
 
           echo "==> Final Minimal AAR Size:"
           ls -lh ../dist/
-
       - name: Upload Minimal MPV AAR
         uses: actions/upload-artifact@v4
         with:
