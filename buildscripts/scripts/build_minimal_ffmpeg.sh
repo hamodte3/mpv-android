@@ -30,6 +30,8 @@ FFMPEG_MINIMAL_FLAGS=(
   --strip=llvm-strip
   --prefix="${PREFIX}"
   --pkg-config=pkg-config
+  --enable-version3
+  --enable-mbedtls
   --disable-static
   --enable-shared
   --disable-everything
@@ -55,7 +57,6 @@ FFMPEG_MINIMAL_FLAGS=(
   --enable-parser=h264,hevc,av1,vp9,aac,mpegaudio
   --enable-demuxer=mov,matroska,flv,hls,dash,aac,mp3,mpegts
   --enable-protocol=file,http,https,tcp,udp,hls,tls
-  --enable-mbedtls
 )
 
 "${FFMPEG_SRC}/configure" "${FFMPEG_MINIMAL_FLAGS[@]}" \
