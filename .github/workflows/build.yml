@@ -1,11 +1,11 @@
-name: Build Custom Minimal MPV AAR
+name: Build Ultra-Minimal MPV AAR
 
 on:
   workflow_dispatch:
 
 jobs:
   build-aar:
-    name: Build Minimal AAR (arm64-v8a)
+    name: Build Ultra-Minimal AAR (arm64-v8a)
     runs-on: ubuntu-latest
 
     steps:
@@ -73,10 +73,9 @@ jobs:
           echo "NDK=$NDK_PATH" >> $GITHUB_ENV
           echo "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
 
-      - name: Inject Custom Scripts & Build Dependencies
+      - name: Inject Ultra-Minimal Scripts
         run: |
           set -euo pipefail
-
           CORE_DIR="$GITHUB_WORKSPACE/mpv-core/buildscripts"
           mkdir -p "$CORE_DIR/scripts"
 
@@ -95,39 +94,7 @@ jobs:
           fi
           EOF
 
-          # 2. بناء mbedtls مع تثبيت قسري في prefix/lib
-          cat << 'EOF' > "$CORE_DIR/scripts/build_mbedtls.sh"
-          #!/usr/bin/env bash
-          set -euo pipefail
-
-          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-          . "${SCRIPT_DIR}/depinfo.sh"
-
-          PREFIX="${SCRIPT_DIR}/prefix"
-          BUILD_DIR="${SCRIPT_DIR}/build/mbedtls"
-          SRC_DIR="${SCRIPT_DIR}/deps/mbedtls"
-          [ -d "${SRC_DIR}" ] || SRC_DIR="${SCRIPT_DIR}/../deps/mbedtls"
-
-          echo "==> Building mbedtls..."
-          mkdir -p "${BUILD_DIR}" "${PREFIX}"
-
-          cmake -B "${BUILD_DIR}" -S "${SRC_DIR}" \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-24 \
-            -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
-            -DCMAKE_INSTALL_LIBDIR=lib \
-            -DENABLE_TESTING=OFF \
-            -DENABLE_PROGRAMS=OFF \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_FLAGS="-Os -flto -fPIC -Qunused-arguments"
-
-          ninja -C "${BUILD_DIR}" install
-          echo "==> mbedtls installed successfully in ${PREFIX}/lib."
-          EOF
-
-          # 3. بناء FFmpeg مع الدمج الإجباري لأرشيف التشفير
+          # 2. سكربت بناء FFmpeg فائق النحافة (MediaCodec فقط وبدون أخطاء تشفير خارجية)
           cat << 'EOF' > "$CORE_DIR/scripts/build_minimal_ffmpeg.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -142,8 +109,6 @@ jobs:
 
           mkdir -p "${BUILD_DIR}" "${PREFIX}"
           cd "${BUILD_DIR}"
-
-          export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
           SAFE_CFLAGS="${EXTRA_CFLAGS:-} -I${PREFIX}/include -fvisibility=default"
           SAFE_LDFLAGS="-Wl,-z,max-page-size=16384 -Wl,--gc-sections -L${PREFIX}/lib"
@@ -160,16 +125,13 @@ jobs:
             --nm=llvm-nm
             --strip=llvm-strip
             --prefix="${PREFIX}"
-            --pkg-config=pkg-config
-            --pkg-config-flags="--static"
-            --enable-version3
-            --enable-mbedtls
             --disable-static
             --enable-shared
             --disable-everything
             --disable-doc
             --disable-programs
             --disable-encoders
+            --disable-muxers
             --disable-devices
             --disable-filters
             --disable-iconv
@@ -184,23 +146,23 @@ jobs:
             --enable-hwaccel=hevc_mediacodec
             --enable-hwaccel=vp9_mediacodec
             --enable-hwaccel=av1_mediacodec
-            --enable-decoder=h264,hevc,vp8,vp9,mpeg4,aac,mp3,flac
-            --enable-parser=h264,hevc,av1,vp9,aac,mpegaudio
-            --enable-demuxer=mov,matroska,flv,hls,dash,aac,mp3,mpegts
-            --enable-protocol=file,http,https,tcp,udp,hls,tls
+            --enable-decoder=h264_mediacodec,hevc_mediacodec,vp9_mediacodec,av1_mediacodec
+            --enable-decoder=aac,mp3,flac,opus,vorbis
+            --enable-parser=h264,hevc,av1,vp9,aac,mpegaudio,opus,flac
+            --enable-demuxer=mov,matroska,flv,hls,dash,aac,mp3,mpegts,ogg,wav
+            --enable-protocol=file,http,tcp,udp,hls
           )
 
           "${FFMPEG_SRC}/configure" "${FFMPEG_MINIMAL_FLAGS[@]}" \
             --extra-cflags="${SAFE_CFLAGS}" \
-            --extra-ldflags="${SAFE_LDFLAGS}" \
-            --extra-libs="-Wl,--whole-archive ${PREFIX}/lib/libmbedtls.a ${PREFIX}/lib/libmbedx509.a ${PREFIX}/lib/libmbedcrypto.a -Wl,--no-whole-archive"
+            --extra-ldflags="${SAFE_LDFLAGS}"
 
           make -j"$(nproc)"
           make install
-          echo "==> Minimal FFmpeg installed successfully."
+          echo "==> Ultra-Minimal FFmpeg installed successfully."
           EOF
 
-          # 4. بناء libplacebo (Static)
+          # 3. سكربت بناء libplacebo (Static)
           cat << 'EOF' > "$CORE_DIR/scripts/build_libplacebo.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -246,7 +208,7 @@ jobs:
           ninja -C "${BUILD_DIR}" -j$(nproc) install
           EOF
 
-          # 5. بناء منظومة الخطوط مع تعطيل استثناءات HarfBuzz
+          # 4. بناء منظومة الخطوط والترجمة (FreeType + FriBidi + HarfBuzz + libass) كـ Static
           cat << 'EOF' > "$CORE_DIR/scripts/build_libass.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -256,7 +218,7 @@ jobs:
 
           PREFIX="${SCRIPT_DIR}/prefix"
           CROSS_FILE="${SCRIPT_DIR}/build/android_cross.txt"
-          export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PREFIX}/lib64/pkgconfig:${PKG_CONFIG_PATH:-}"
           export PKG_CONFIG_LIBDIR="${PREFIX}/lib/pkgconfig"
 
           export CFLAGS_FOR_BUILD="-fno-lto"
@@ -345,7 +307,7 @@ jobs:
           ninja -C "${ASS_BUILD}" -j$(nproc) install
           EOF
 
-          # 6. بناء MPV مع تعطيل الـ encoding لمنع طلب av_write_trailer
+          # 5. بناء MPV المصغر مع تعطيل الترميز
           cat << 'EOF' > "$CORE_DIR/scripts/build_mpv.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -360,7 +322,7 @@ jobs:
           rm -rf "${BUILD_DIR}"
           mkdir -p "${BUILD_DIR}" "${PREFIX}"
 
-          export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PREFIX}/lib64/pkgconfig:${PKG_CONFIG_PATH:-}"
           export PKG_CONFIG_LIBDIR="${PREFIX}/lib/pkgconfig"
 
           MESON_ARGS=(
@@ -386,7 +348,7 @@ jobs:
           ninja -C "${BUILD_DIR}" -j$(nproc) install
           EOF
 
-          # 7. بناء جسر الأندرويد libplayer.so
+          # 6. بناء جسر الأندرويد libplayer.so
           cat << 'EOF' > "$CORE_DIR/scripts/build_player.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -416,7 +378,7 @@ jobs:
             -o "${PREFIX}/lib/libplayer.so"
           EOF
 
-          # 8. المنسق buildall.sh
+          # 7. المنسق الرئيسي buildall.sh
           cat << 'EOF' > "$CORE_DIR/scripts/buildall.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -452,24 +414,21 @@ jobs:
           cpp_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=safe', '-Wl,-z,max-page-size=16384', '-L${PREFIX}/lib']
           CROSS_EOF
 
-          echo "==> [1/6] Building mbedtls..."
-          bash "${SCRIPT_DIR}/build_mbedtls.sh"
-
-          echo "==> [2/6] Running Minimal FFmpeg..."
+          echo "==> [1/5] Running Minimal FFmpeg (Hardware Decoders Only)..."
           export EXTRA_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections -fmerge-all-constants"
           export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=safe -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384"
           bash "${SCRIPT_DIR}/build_minimal_ffmpeg.sh"
 
-          echo "==> [3/6] Building libplacebo (Static)..."
+          echo "==> [2/5] Building libplacebo (Static)..."
           bash "${SCRIPT_DIR}/build_libplacebo.sh"
 
-          echo "==> [4/6] Building libass & font stack (Static)..."
+          echo "==> [3/5] Building libass & font stack (Static)..."
           bash "${SCRIPT_DIR}/build_libass.sh"
 
-          echo "==> [5/6] Building MPV..."
+          echo "==> [4/5] Building MPV..."
           bash "${SCRIPT_DIR}/build_mpv.sh"
 
-          echo "==> [6/6] Building libplayer.so..."
+          echo "==> [5/5] Building libplayer.so..."
           bash "${SCRIPT_DIR}/build_player.sh"
           EOF
 
@@ -582,10 +541,10 @@ jobs:
           # نسخ كافة المكتبات الناتجة
           find buildscripts/scripts/prefix/lib/ -maxdepth 1 -name "*.so" -exec cp -v -aL {} app/src/main/jniLibs/arm64-v8a/ \;
 
-          # تجريد آمن لكافة المكتبات دون المساس بـ .note
+          # تجريد آمن لكافة المكتبات دون المساس بـ .note لـ Android 15
           find app/src/main/jniLibs/arm64-v8a/ -name "*.so" -exec "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-unneeded -R .comment {} + 2>/dev/null || true
 
-          # حقن التبعية الصريحة داخل libmpv.so آلياً في السيرفر
+          # ربط الاعتمادية صراحة داخل libmpv.so عبر patchelf
           patchelf --add-needed libc++_shared.so app/src/main/jniLibs/arm64-v8a/libmpv.so
 
           chmod +x gradlew
@@ -594,9 +553,13 @@ jobs:
           mkdir -p ../dist
           find app/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} ../dist/mpv-android.aar \;
 
-      - name: Upload Minimal MPV AAR
+          echo "==> Verifying Final Libraries and Sizes:"
+          ls -lh app/src/main/jniLibs/arm64-v8a/
+          ls -lh ../dist/mpv-android.aar
+
+      - name: Upload Ultra-Minimal MPV AAR
         uses: actions/upload-artifact@v4
         with:
-          name: mpv-android-minimal-aar
+          name: mpv-android-ultra-minimal-aar
           path: dist/mpv-android.aar
           if-no-files-found: error
