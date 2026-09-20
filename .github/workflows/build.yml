@@ -124,7 +124,7 @@ jobs:
           set -euo pipefail
           cd mpv-core
 
-          # 1. تنظيف وإعادة ضبط app/build.gradle عبر بايثون
+          # 1. تنظيف app/build.gradle والمانيفست عبر بايثون
           python3 - << 'EOF'
           import re
 
@@ -157,7 +157,6 @@ jobs:
               while re.search(r'\b' + block + r'\b[^{]*\{', content):
                   content = remove_block(content, block)
 
-          # حقن مسار jniLibs صراحة لضمان حزم ملفات .so داخل الـ AAR
           custom_config = '''
               sourceSets {
                   main {
@@ -192,7 +191,7 @@ jobs:
               f.write(manifest)
           EOF
 
-          # 2. تعديل AboutActivity.kt لتفادي خطأ المتغيرات
+          # 2. تعديل AboutActivity.kt لتفادي أخطاء الرموز المفقودة
           ABOUT_FILE=$(find app/src/main/ -name "AboutActivity.kt" | head -n 1)
           if [ -n "$ABOUT_FILE" ] && [ -f "$ABOUT_FILE" ]; then
             sed -i '/import.*VERSION_NAME/d' "$ABOUT_FILE"
@@ -203,31 +202,33 @@ jobs:
             sed -i 's/\bVERSION_CODE\b/1/g' "$ABOUT_FILE"
           fi
 
-          # 3. جمع كل ملفات .so المبنية ووضعها داخل مجلد arm64-v8a
+          # 3. حذف أي symlink قديم وتجهيز مسار نظيف
           rm -rf app/src/main/jniLibs app/libs
           mkdir -p app/src/main/jniLibs/arm64-v8a
 
-          echo "==> Finding all built .so files:"
-          find buildscripts/ -name "*.so" -print
+          # نسخ المكتبات النهائية الصافية فقط من مجلد prefix
+          echo "==> Copying production libraries from prefix..."
+          find buildscripts/prefix/arm64/lib/ -maxdepth 1 -name "*.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \;
 
-          # نسخ كافة ملفات .so المترجمة لمجلد jniLibs
-          find buildscripts/ -name "*.so" -exec cp -v {} app/src/main/jniLibs/arm64-v8a/ \;
+          # تجريد كافة ملفات .so من رموز الـ Debug لتقليص الحجم للحد الأدنى
+          echo "==> Stripping debug symbols..."
+          find app/src/main/jniLibs/arm64-v8a/ -name "*.so" -exec "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all -R .comment -R .note {} +
 
-          echo "==> Files ready for packaging in jniLibs/arm64-v8a:"
+          echo "==> Production libraries size:"
           ls -lh app/src/main/jniLibs/arm64-v8a/
 
-          # 4. بناء الـ AAR
+          # 4. بناء الـ AAR عبر Gradle
           chmod +x gradlew
           ./gradlew :app:assembleDefaultRelease -x lint -x test --no-daemon
 
-          # 5. استخراج الـ AAR والتحقق من احتوائه على ملفات الـ .so
+          # 5. استخراج الـ AAR والتحقق من الحجم والمحتوى
           mkdir -p ../dist
           find app/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} ../dist/mpv-android.aar \;
 
-          echo "==> Inspecting AAR contents:"
-          unzip -l ../dist/mpv-android.aar | grep -E '\.so$' || (echo "ERROR: No .so files found inside AAR!" && exit 1)
+          echo "==> AAR Native Contents:"
+          unzip -l ../dist/mpv-android.aar | grep -E '\.so$'
 
-          echo "==> Final Generated AAR size:"
+          echo "==> Final Minimal AAR Size:"
           ls -lh ../dist/
 
       - name: Upload Minimal MPV AAR
