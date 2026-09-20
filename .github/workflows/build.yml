@@ -84,10 +84,25 @@ jobs:
 
           mkdir -p "$CORE_DIR/scripts"
 
-          # 1. نسخ سكريبتاتك المخصصة إلى مجلد scripts
-          find "$USER_DIR" -type f \( -name "build_minimal_ffmpeg.sh" -o -name "build_mpv.sh" -o -name "mpv.map" \) -exec cp -v {} "$CORE_DIR/scripts/" \;
+          # 1. نسخ كافة السكربتات وملفات الـ map من مستودعك
+          find "$USER_DIR" -type f \( -name "*.sh" -o -name "mpv.map" \) -exec cp -v {} "$CORE_DIR/scripts/" \;
 
-          # 2. حقن سكريبت buildall.sh
+          # 2. إنشاء / التأكد من وجود depinfo.sh بالمتغيرات المطلوبة للـ NDK
+          cat << 'EOF' > "$CORE_DIR/scripts/depinfo.sh"
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          export API_LEVEL="24"
+          export TARGET_ARCH="aarch64"
+          export TARGET="aarch64-linux-android${API_LEVEL}"
+
+          if [ -n "${ANDROID_NDK_HOME:-}" ]; then
+            export NDK_LLVM="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64"
+            export PATH="${NDK_LLVM}/bin:${PATH}"
+          fi
+          EOF
+
+          # 3. توحيد وإعداد buildall.sh
           cat << 'EOF' > "$CORE_DIR/scripts/buildall.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -106,7 +121,7 @@ jobs:
           if [ -f "${SCRIPT_DIR}/build_minimal_ffmpeg.sh" ]; then
             bash "${SCRIPT_DIR}/build_minimal_ffmpeg.sh"
           else
-            echo "ERROR: build_minimal_ffmpeg.sh not found in ${SCRIPT_DIR}!"
+            echo "ERROR: build_minimal_ffmpeg.sh not found!"
             exit 1
           fi
 
@@ -114,14 +129,13 @@ jobs:
           if [ -f "${SCRIPT_DIR}/build_mpv.sh" ]; then
             bash "${SCRIPT_DIR}/build_mpv.sh"
           else
-            echo "ERROR: build_mpv.sh not found in ${SCRIPT_DIR}!"
+            echo "ERROR: build_mpv.sh not found!"
             exit 1
           fi
 
-          echo "==> [5/5] Post-Processing: Stripping .comment notes..."
+          echo "==> [5/5] Post-Processing: Stripping binaries..."
           if command -v llvm-strip &> /dev/null; then
             find "${SCRIPT_DIR}/prefix" -name "*.so" -exec llvm-strip --strip-debug --strip-unneeded -R .comment {} + 2>/dev/null || true
-            echo "==> Stripped .comment notes using llvm-strip."
           fi
 
           echo "==> Complete! Optimized NDK Build Finished Successfully."
@@ -129,7 +143,7 @@ jobs:
 
           chmod +x "$CORE_DIR"/scripts/*.sh "$CORE_DIR"/*.sh
 
-          # 3. تنزيل الاعتماديات
+          # 4. تنزيل الاعتماديات
           cd "$CORE_DIR"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype.git"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype"
@@ -138,16 +152,15 @@ jobs:
           ./download.sh
           find deps/ -name "meson.build" -exec sed -i "s/meson_version : '>= [0-9.]*'/meson_version : '>= 0.60.0'/g" {} + 2>/dev/null || true
 
-          # 4. ربط مجلد deps والمسارات داخل scripts لتطابق مسارات سكريبتاتك تماماً
+          # 5. ربط المسارات المطلوبة داخل scripts/
           ln -sfn "$CORE_DIR/deps" "$CORE_DIR/scripts/deps"
           ln -sfn "$CORE_DIR/include" "$CORE_DIR/scripts/include" 2>/dev/null || true
           ln -sfn "$CORE_DIR/sdk" "$CORE_DIR/scripts/sdk" 2>/dev/null || true
 
-          # 5. تشغيل البناء
+          # 6. تشغيل البناء الفعلي
           echo "==> Launching compilation process..."
           cd "$CORE_DIR/scripts"
           bash -x ./buildall.sh
-
       - name: Assemble Release AAR
         run: |
           set -euo pipefail
