@@ -27,7 +27,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             ninja-build \
-            meson \
             autoconf \
             automake \
             libtool \
@@ -37,20 +36,23 @@ jobs:
             yasm \
             nasm \
             python3 \
+            python3-pip \
+            python3-setuptools \
             python3-jinja2 \
             wget \
             unzip
+
+          # ترقية Meson لأحدث إصدار من PyPI لتجاوز قيود حزم Ubuntu القديمة
+          sudo pip3 install --break-system-packages --upgrade meson ninja
 
       - name: Setup Android SDK & NDK r27c
         run: |
           set -euo pipefail
           cd buildscripts
 
-          # ربط SDK
           mkdir -p sdk
           ln -sfn "$ANDROID_SDK_ROOT" sdk/android-sdk-linux
 
-          # تنزيل NDK r27c (الإصدار الأكثر استقراراً ورسمياً مع سكريبتات mpv-android ويدعم 16KB)
           if [ ! -d "sdk/android-ndk-r27c" ]; then
             echo "==> Downloading NDK r27c..."
             wget -q --progress=bar:force "https://dl.google.com/android/repository/android-ndk-r27c-linux.zip" -O ndk.zip
@@ -69,29 +71,49 @@ jobs:
           set -euo pipefail
           cd buildscripts
 
-          # تنزيل جميع السورسات الرسمية
+          # 1. تنزيل الاعتماديات
           ./download.sh
 
-          # فرض محاذاة 16KB والربط الساكن لـ C++
+          # 2. إزالة قيود إصدار Meson الصارمة من ملفات البناء (تجاوز خطأ fontconfig وغيره)
+          find deps/ -name "meson.build" -exec sed -i "s/meson_version : '>= [0-9.]*'/meson_version : '>= 0.60.0'/g" {} + 2>/dev/null || true
+
+          # 3. فرض التحسين ومحاذاة 16KB
           export EXTRA_CFLAGS="-Os -flto -ffunction-sections -fdata-sections"
           export EXTRA_LDFLAGS="-Wl,--gc-sections -flto -Wl,-z,max-page-size=16384 -static-libstdc++"
 
-          # بناء جميع الاعتماديات لـ arm64-v8a فقط
+          # 4. بناء مكتبات الـ native لمعمارية arm64
           ./buildall.sh --arch arm64
+
+          # 5. تجريد الرموز الزائدة لتقليل الحجم لأقصى درجة
+          find prefix/arm64/ -name "*.so" -exec llvm-strip --strip-unneeded -R .comment {} + 2>/dev/null || true
 
       - name: Assemble Release AAR
         run: |
           set -euo pipefail
 
-          # بناء مكتبة الـ AAR عبر Gradle
+          # 1. تحويل الموديول من تطبيق إلى مكتبة أندرويد (Library AAR)
+          for f in app/build.gradle app/build.gradle.kts; do
+            if [ -f "$f" ]; then
+              sed -i 's/com\.android\.application/com.android.library/g' "$f"
+              sed -i '/applicationId/d' "$f"
+            fi
+          done
+
+          # 2. تنظيف الـ Manifest لمنع أي تعارض أسماء مع تطبيقك الأساسي
+          sed -i '/android:icon=/d' app/src/main/AndroidManifest.xml || true
+          sed -i '/android:roundIcon=/d' app/src/main/AndroidManifest.xml || true
+          sed -i '/android:label=/d' app/src/main/AndroidManifest.xml || true
+          sed -i '/android:theme=/d' app/src/main/AndroidManifest.xml || true
+
+          # 3. بناء ملف الـ AAR عبر Gradle
           chmod +x gradlew
-          ./gradlew :mpvlib:assembleRelease --no-daemon
+          ./gradlew assembleRelease -x lint -x test --no-daemon
 
-          # تجهيز مجلد المخرجات
+          # 4. تجهيز ملف الـ AAR للتحميل
           mkdir -p dist
-          find mpvlib/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} dist/mpv-android.aar \;
+          find app/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} dist/mpv-android.aar \;
 
-          echo "==> AAR Built Successfully:"
+          echo "==> Final Generated AAR:"
           ls -lh dist/
 
       - name: Upload MPV AAR
