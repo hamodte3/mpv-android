@@ -161,6 +161,7 @@ jobs:
           MESON_ARGS=(
             "--cross-file=${CROSS_FILE}"
             "--prefix=${PREFIX}"
+            "--libdir=lib"
             "--buildtype=release"
             "--default-library=static"
             "-Db_staticpic=true"
@@ -182,7 +183,120 @@ jobs:
           echo "==> libplacebo static build completed successfully!"
           EOF
 
-          # 5. سكربت بناء MPV المصغر
+          # 5. سكربت بناء حزمة الترجمة والخطوط (FreeType + FriBidi + libass) كـ Static
+          cat << 'EOF' > "$CORE_DIR/scripts/build_libass.sh"
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          . "${SCRIPT_DIR}/depinfo.sh"
+
+          PREFIX="${SCRIPT_DIR}/prefix"
+          CROSS_FILE="${SCRIPT_DIR}/build/android_cross.txt"
+          export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PREFIX}/lib64/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export PKG_CONFIG_LIBDIR="${PREFIX}/lib/pkgconfig"
+
+          # 5.1 بناء FreeType (Static)
+          FT_SRC="${SCRIPT_DIR}/deps/freetype"
+          [ -d "${FT_SRC}" ] || FT_SRC="${SCRIPT_DIR}/../deps/freetype"
+          if [ ! -d "${FT_SRC}" ]; then
+            echo "==> Cloning freetype..."
+            git clone --depth 1 https://github.com/freetype/freetype.git "${FT_SRC}"
+          fi
+          FT_BUILD="${SCRIPT_DIR}/build/freetype"
+
+          echo "==> Building FreeType (Static)..."
+          rm -rf "${FT_BUILD}"
+          meson setup "${FT_BUILD}" "${FT_SRC}" \
+            --cross-file="${CROSS_FILE}" \
+            --prefix="${PREFIX}" \
+            --libdir=lib \
+            --buildtype=release \
+            --default-library=static \
+            -Db_staticpic=true \
+            -Doptimization=s \
+            -Db_lto=true \
+            -Dauto_features=disabled
+          ninja -C "${FT_BUILD}" -j$(nproc) install
+
+          # 5.2 بناء FriBidi (Static)
+          FB_SRC="${SCRIPT_DIR}/deps/fribidi"
+          [ -d "${FB_SRC}" ] || FB_SRC="${SCRIPT_DIR}/../deps/fribidi"
+          if [ ! -d "${FB_SRC}" ]; then
+            echo "==> Cloning fribidi..."
+            git clone --depth 1 https://github.com/fribidi/fribidi.git "${FB_SRC}"
+          fi
+          FB_BUILD="${SCRIPT_DIR}/build/fribidi"
+
+          echo "==> Building FriBidi (Static)..."
+          rm -rf "${FB_BUILD}"
+          meson setup "${FB_BUILD}" "${FB_SRC}" \
+            --cross-file="${CROSS_FILE}" \
+            --prefix="${PREFIX}" \
+            --libdir=lib \
+            --buildtype=release \
+            --default-library=static \
+            -Db_staticpic=true \
+            -Doptimization=s \
+            -Db_lto=true \
+            -Dauto_features=disabled \
+            -Ddocs=false \
+            -Dtests=false
+          ninja -C "${FB_BUILD}" -j$(nproc) install
+
+          # 5.3 بناء libass (Static)
+          ASS_SRC="${SCRIPT_DIR}/deps/libass"
+          [ -d "${ASS_SRC}" ] || ASS_SRC="${SCRIPT_DIR}/../deps/libass"
+          if [ ! -d "${ASS_SRC}" ]; then
+            echo "==> Cloning libass..."
+            git clone --depth 1 https://github.com/libass/libass.git "${ASS_SRC}"
+          fi
+          ASS_BUILD="${SCRIPT_DIR}/build/libass"
+
+          echo "==> Building libass (Static)..."
+          rm -rf "${ASS_BUILD}"
+          if [ -f "${ASS_SRC}/meson.build" ]; then
+            meson setup "${ASS_BUILD}" "${ASS_SRC}" \
+              --cross-file="${CROSS_FILE}" \
+              --prefix="${PREFIX}" \
+              --libdir=lib \
+              --buildtype=release \
+              --default-library=static \
+              -Db_staticpic=true \
+              -Doptimization=s \
+              -Db_lto=true \
+              -Dauto_features=disabled \
+              -Dfontconfig=disabled \
+              -Dharfbuzz=disabled
+            ninja -C "${ASS_BUILD}" -j$(nproc) install
+          else
+            cd "${ASS_SRC}"
+            [ -f ./configure ] || ./autogen.sh
+            mkdir -p "${ASS_BUILD}" && cd "${ASS_BUILD}"
+            "${ASS_SRC}/configure" \
+              --host="${TARGET}" \
+              --prefix="${PREFIX}" \
+              --libdir="${PREFIX}/lib" \
+              --disable-shared \
+              --enable-static \
+              --disable-fontconfig \
+              --disable-harfbuzz \
+              --disable-require-system-font-provider \
+              CC="${NDK_LLVM}/bin/${TARGET}-clang" \
+              CXX="${NDK_LLVM}/bin/${TARGET}-clang++" \
+              AR="${NDK_LLVM}/bin/llvm-ar" \
+              RANLIB="${NDK_LLVM}/bin/llvm-ranlib" \
+              CFLAGS="-Os -flto -fPIC -I${PREFIX}/include" \
+              LDFLAGS="-L${PREFIX}/lib" \
+              PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PREFIX}/lib64/pkgconfig"
+            make -j$(nproc)
+            make install
+          fi
+
+          echo "==> libass installed successfully into prefix!"
+          EOF
+
+          # 6. سكربت بناء MPV المصغر
           cat << 'EOF' > "$CORE_DIR/scripts/build_mpv.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -203,6 +317,7 @@ jobs:
           MESON_ARGS=(
             "--cross-file=${CROSS_FILE}"
             "--prefix=${PREFIX}"
+            "--libdir=lib"
             "--buildtype=release"
             "--default-library=shared"
             "-Doptimization=s"
@@ -229,7 +344,7 @@ jobs:
           echo "==> MPV Build Complete! libmpv.so is ready in: ${PREFIX}/lib"
           EOF
 
-          # 6. سكربت بناء جسر الأندرويد libplayer.so
+          # 7. سكربت بناء جسر الأندرويد libplayer.so
           cat << 'EOF' > "$CORE_DIR/scripts/build_player.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -262,7 +377,7 @@ jobs:
           echo "==> libplayer.so built successfully in ${PREFIX}/lib!"
           EOF
 
-          # 7. المنسق الرئيسي buildall.sh مع ترتيب السلسلة الكاملة
+          # 8. المنسق الرئيسي buildall.sh
           cat << 'EOF' > "$CORE_DIR/scripts/buildall.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -274,11 +389,11 @@ jobs:
           PREFIX="${SCRIPT_DIR}/prefix"
           BUILD_DIR="${SCRIPT_DIR}/build"
 
-          echo "==> [1/7] Cleaning old build & prefix artifacts..."
+          echo "==> [1/8] Cleaning old build & prefix artifacts..."
           rm -rf "${BUILD_DIR}" "${PREFIX}"
           mkdir -p "${BUILD_DIR}" "${PREFIX}"
 
-          echo "==> [2/7] Generating Shared Meson Cross File..."
+          echo "==> [2/8] Generating Shared Meson Cross File..."
           cat << CROSS_EOF > "${BUILD_DIR}/android_cross.txt"
           [binaries]
           c = '${NDK_LLVM}/bin/${TARGET}-clang'
@@ -300,21 +415,24 @@ jobs:
           cpp_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=all', '-Wl,-z,max-page-size=16384', '-L${PREFIX}/lib']
           CROSS_EOF
 
-          echo "==> [3/7] Building mbedtls (HTTPS backend)..."
+          echo "==> [3/8] Building mbedtls (HTTPS backend)..."
           bash "${SCRIPT_DIR}/build_mbedtls.sh"
 
-          echo "==> [4/7] Running FFmpeg Minimal Build..."
+          echo "==> [4/8] Running FFmpeg Minimal Build..."
           export EXTRA_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections -fmerge-all-constants"
           export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=all -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384"
           bash "${SCRIPT_DIR}/build_minimal_ffmpeg.sh"
 
-          echo "==> [5/7] Building libplacebo (Static)..."
+          echo "==> [5/8] Building libplacebo (Static)..."
           bash "${SCRIPT_DIR}/build_libplacebo.sh"
 
-          echo "==> [6/7] Building MPV..."
+          echo "==> [6/8] Building libass & font stack (Static)..."
+          bash "${SCRIPT_DIR}/build_libass.sh"
+
+          echo "==> [7/8] Building MPV..."
           bash "${SCRIPT_DIR}/build_mpv.sh"
 
-          echo "==> [7/7] Building libplayer.so (JNI Bridge)..."
+          echo "==> [8/8] Building libplayer.so (JNI Bridge)..."
           bash "${SCRIPT_DIR}/build_player.sh"
 
           echo "==> Post-Processing: Stripping .so binaries..."
@@ -327,7 +445,7 @@ jobs:
 
           chmod +x "$CORE_DIR"/scripts/*.sh "$CORE_DIR"/*.sh
 
-          # 8. تنزيل الاعتماديات وربط المسارات
+          # 9. تنزيل الاعتماديات وربط المسارات
           cd "$CORE_DIR"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype.git"
           git config --global url."https://github.com/freetype/freetype.git".insteadOf "https://gitlab.freedesktop.org/freetype/freetype"
@@ -427,7 +545,7 @@ jobs:
             sed -i 's/\bVERSION_CODE\b/1/g' "$ABOUT_FILE"
           fi
 
-          # 3. جلب كافة ملفات .so الصافية الناتجة وفك الروابط الرمزية
+          # 3. جلب ملفات .so الصافية فقط وفك الروابط الرمزية
           rm -rf app/src/main/jniLibs app/libs
           mkdir -p app/src/main/jniLibs/arm64-v8a
 
