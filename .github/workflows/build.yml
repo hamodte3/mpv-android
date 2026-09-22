@@ -1,11 +1,11 @@
-name: Build Ultra-Minimal MPV AAR
+name: Build Ultra-Minimal MPV (Zero Technical Debt)
 
 on:
   workflow_dispatch:
 
 jobs:
   build-aar:
-    name: Build Ultra-Minimal AAR (arm64-v8a)
+    name: Build Ultra-Minimal Native Engine (arm64-v8a)
     runs-on: ubuntu-latest
 
     steps:
@@ -47,8 +47,7 @@ jobs:
             python3-setuptools \
             python3-jinja2 \
             wget \
-            unzip \
-            patchelf
+            unzip
 
           sudo pip3 install --break-system-packages --upgrade meson ninja
 
@@ -94,7 +93,7 @@ jobs:
           fi
           EOF
 
-          # 2. سكربت بناء FFmpeg فائق النحافة (MediaCodec فقط وبدون أخطاء تشفير خارجية)
+          # 2. سكربت بناء FFmpeg Static مدمج بالكامل لمنع الشاشة السوداء
           cat << 'EOF' > "$CORE_DIR/scripts/build_minimal_ffmpeg.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -110,7 +109,7 @@ jobs:
           mkdir -p "${BUILD_DIR}" "${PREFIX}"
           cd "${BUILD_DIR}"
 
-          SAFE_CFLAGS="${EXTRA_CFLAGS:-} -I${PREFIX}/include -fvisibility=default"
+          SAFE_CFLAGS="${EXTRA_CFLAGS:-} -I${PREFIX}/include -fPIC"
           SAFE_LDFLAGS="-Wl,-z,max-page-size=16384 -Wl,--gc-sections -L${PREFIX}/lib"
 
           FFMPEG_MINIMAL_FLAGS=(
@@ -125,8 +124,12 @@ jobs:
             --nm=llvm-nm
             --strip=llvm-strip
             --prefix="${PREFIX}"
-            --disable-static
-            --enable-shared
+            --pkg-config=pkg-config
+            --pkg-config-flags="--static"
+            --enable-version3
+            --enable-static
+            --disable-shared
+            --enable-pic
             --disable-everything
             --disable-doc
             --disable-programs
@@ -146,8 +149,8 @@ jobs:
             --enable-hwaccel=hevc_mediacodec
             --enable-hwaccel=vp9_mediacodec
             --enable-hwaccel=av1_mediacodec
-            --enable-decoder=h264_mediacodec,hevc_mediacodec,vp9_mediacodec,av1_mediacodec
-            --enable-decoder=aac,mp3,flac,opus,vorbis
+            --enable-decoder=h264,hevc,vp8,vp9,av1,mpeg4,h264_mediacodec,hevc_mediacodec,vp9_mediacodec,av1_mediacodec
+            --enable-decoder=aac,mp3,flac,opus,vorbis,ac3,eac3
             --enable-parser=h264,hevc,av1,vp9,aac,mpegaudio,opus,flac
             --enable-demuxer=mov,matroska,flv,hls,dash,aac,mp3,mpegts,ogg,wav
             --enable-protocol=file,http,tcp,udp,hls
@@ -159,7 +162,7 @@ jobs:
 
           make -j"$(nproc)"
           make install
-          echo "==> Ultra-Minimal FFmpeg installed successfully."
+          echo "==> Static Ultra-Minimal FFmpeg installed successfully."
           EOF
 
           # 3. سكربت بناء libplacebo (Static)
@@ -208,7 +211,7 @@ jobs:
           ninja -C "${BUILD_DIR}" -j$(nproc) install
           EOF
 
-          # 4. بناء منظومة الخطوط والترجمة (FreeType + FriBidi + HarfBuzz + libass) كـ Static
+          # 4. بناء منظومة الترجمة والخطوط (Static)
           cat << 'EOF' > "$CORE_DIR/scripts/build_libass.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -264,7 +267,7 @@ jobs:
             -Dtests=false
           ninja -C "${FB_BUILD}" -j$(nproc) install
 
-          # HarfBuzz (تعطيل الاستثناءات)
+          # HarfBuzz (Static C++)
           HB_SRC="${SCRIPT_DIR}/deps/harfbuzz"
           [ -d "${HB_SRC}" ] || HB_SRC="${SCRIPT_DIR}/../deps/harfbuzz"
           if [ ! -d "${HB_SRC}" ]; then
@@ -307,7 +310,7 @@ jobs:
           ninja -C "${ASS_BUILD}" -j$(nproc) install
           EOF
 
-          # 5. بناء MPV المصغر مع تعطيل الترميز
+          # 5. بناء MPV كـ Shared مدمج ذاتياً
           cat << 'EOF' > "$CORE_DIR/scripts/build_mpv.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -348,7 +351,7 @@ jobs:
           ninja -C "${BUILD_DIR}" -j$(nproc) install
           EOF
 
-          # 6. بناء جسر الأندرويد libplayer.so
+          # 6. بناء جسر libplayer.so بربط C++ ثابت وبدون أي توابع ميتة
           cat << 'EOF' > "$CORE_DIR/scripts/build_player.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -366,15 +369,17 @@ jobs:
           JNI_FILES=$(find "${JNI_DIR}" -type f \( -name "*.cpp" -o -name "*.c" \))
 
           "${CXX}" -shared -fPIC \
+            -static-libstdc++ \
             -Os -flto \
             -ffunction-sections -fdata-sections \
             -Wl,--gc-sections -Wl,-s \
             -Wl,--icf=safe \
+            -Wl,--exclude-libs,ALL \
             -Wl,-z,max-page-size=16384 \
             -I"${PREFIX}/include" \
             -L"${PREFIX}/lib" \
             ${JNI_FILES} \
-            -lmpv -lavcodec -lavutil -lc++_shared -landroid -llog -lOpenSLES -lEGL -lGLESv3 \
+            -lmpv -landroid -llog -lOpenSLES -lEGL -lGLESv3 \
             -o "${PREFIX}/lib/libplayer.so"
           EOF
 
@@ -393,6 +398,7 @@ jobs:
           rm -rf "${BUILD_DIR}" "${PREFIX}"
           mkdir -p "${BUILD_DIR}" "${PREFIX}"
 
+          # ربط C++ الثابت في ملف التجميع لمنع __gxx_personality_v0 نهائياً
           cat << CROSS_EOF > "${BUILD_DIR}/android_cross.txt"
           [binaries]
           c = '${NDK_LLVM}/bin/${TARGET}-clang'
@@ -409,14 +415,14 @@ jobs:
 
           [built-in options]
           c_args = ['-Os', '-flto', '-fvisibility=hidden', '-I${PREFIX}/include']
-          c_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=safe', '-Wl,-z,max-page-size=16384', '-L${PREFIX}/lib']
+          c_link_args = ['-static-libstdc++', '-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=safe', '-Wl,-z,max-page-size=16384', '-L${PREFIX}/lib']
           cpp_args = ['-Os', '-flto', '-fvisibility=hidden', '-I${PREFIX}/include', '-fno-exceptions', '-fno-rtti']
-          cpp_link_args = ['-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=safe', '-Wl,-z,max-page-size=16384', '-L${PREFIX}/lib']
+          cpp_link_args = ['-static-libstdc++', '-Wl,--gc-sections', '-Wl,-s', '-flto', '-Wl,--icf=safe', '-Wl,-z,max-page-size=16384', '-L${PREFIX}/lib']
           CROSS_EOF
 
-          echo "==> [1/5] Running Minimal FFmpeg (Hardware Decoders Only)..."
-          export EXTRA_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections -fmerge-all-constants"
-          export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=safe -Wl,--pack-dyn-relocs=android+relr -Wl,--exclude-libs,ALL -Wl,-Bsymbolic-functions -Wl,--hash-style=gnu -Wl,-z,max-page-size=16384"
+          echo "==> [1/5] Building Minimal Static FFmpeg..."
+          export EXTRA_CFLAGS="-Os -flto -fvisibility=hidden -ffunction-sections -fdata-sections"
+          export EXTRA_LDFLAGS="-Wl,--gc-sections -Wl,-s -flto -Wl,--icf=safe -Wl,-z,max-page-size=16384"
           bash "${SCRIPT_DIR}/build_minimal_ffmpeg.sh"
 
           echo "==> [2/5] Building libplacebo (Static)..."
@@ -534,18 +540,11 @@ jobs:
           rm -rf app/src/main/jniLibs app/libs
           mkdir -p app/src/main/jniLibs/arm64-v8a
 
-          # جلب مكتبة libc++_shared.so وتجريدها
-          cp "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" app/src/main/jniLibs/arm64-v8a/
-          "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-unneeded app/src/main/jniLibs/arm64-v8a/libc++_shared.so
-
-          # نسخ كافة المكتبات الناتجة
+          # نسخ المكتبات الناتجة فقط (libmpv.so و libplayer.so)
           find buildscripts/scripts/prefix/lib/ -maxdepth 1 -name "*.so" -exec cp -v -aL {} app/src/main/jniLibs/arm64-v8a/ \;
 
           # تجريد آمن لكافة المكتبات دون المساس بـ .note لـ Android 15
           find app/src/main/jniLibs/arm64-v8a/ -name "*.so" -exec "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-unneeded -R .comment {} + 2>/dev/null || true
-
-          # ربط الاعتمادية صراحة داخل libmpv.so عبر patchelf
-          patchelf --add-needed libc++_shared.so app/src/main/jniLibs/arm64-v8a/libmpv.so
 
           chmod +x gradlew
           ./gradlew :app:assembleDefaultRelease -x lint -x test --no-daemon
@@ -553,9 +552,15 @@ jobs:
           mkdir -p ../dist
           find app/build/outputs/aar/ -type f -name "*.aar" -exec cp -v {} ../dist/mpv-android.aar \;
 
-          echo "==> Verifying Final Libraries and Sizes:"
+          echo "==> Verifying Final Output Libraries:"
           ls -lh app/src/main/jniLibs/arm64-v8a/
-          ls -lh ../dist/mpv-android.aar
+
+      - name: Upload Ultra-Minimal MPV Native Binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpv-native-libs-arm64
+          path: mpv-core/app/src/main/jniLibs/arm64-v8a/
+          if-no-files-found: error
 
       - name: Upload Ultra-Minimal MPV AAR
         uses: actions/upload-artifact@v4
