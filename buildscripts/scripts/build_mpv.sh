@@ -54,6 +54,8 @@ MESON_ARGS=(
   "-Dhtml-build=disabled"
   "-Dtests=false"
   "-Dencoding=disabled"
+  "-Dc_link_args=['-static-libstdc++']",
+  "-Dcpp_link_args=['-static-libstdc++']",
 )
 
 echo "==> Configuring Minimal MPV with Meson..."
