@@ -310,7 +310,7 @@ jobs:
           ninja -C "${ASS_BUILD}" -j$(nproc) install
           EOF
 
-          # 5. بناء MPV مع إجبار ربط C++ الثابت لمنع خطأ to_chars
+          # 5. بناء MPV بربط C++ ثابت كلياً (Full Static C++ Runtime)
           cat << 'EOF' > "$CORE_DIR/scripts/build_mpv.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -334,8 +334,10 @@ jobs:
             "--libdir=lib"
             "--buildtype=release"
             "--default-library=shared"
-            "-Dc_link_args=['-static-libstdc++']"
-            "-Dcpp_link_args=['-static-libstdc++']"
+            "-Dc_args=['-static-libstdc++', '-fPIC']"
+            "-Dcpp_args=['-static-libstdc++', '-fPIC']"
+            "-Dc_link_args=['-static-libstdc++', '-Wl,-Bstatic', '-lc++', '-lc++abi', '-Wl,-Bdynamic']"
+            "-Dcpp_link_args=['-static-libstdc++', '-Wl,-Bstatic', '-lc++', '-lc++abi', '-Wl,-Bdynamic']"
             "-Doptimization=s"
             "-Db_lto=true"
             "-Dcplayer=false"
