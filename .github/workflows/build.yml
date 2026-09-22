@@ -310,7 +310,7 @@ jobs:
           ninja -C "${ASS_BUILD}" -j$(nproc) install
           EOF
 
-          # 5. بناء MPV مع تمرير ربط C++ الثابت لمنع خطأ to_chars
+          # 5. بناء MPV مع إجبار ربط C++ الثابت لمنع خطأ to_chars
           cat << 'EOF' > "$CORE_DIR/scripts/build_mpv.sh"
           #!/usr/bin/env bash
           set -euo pipefail
