@@ -12,7 +12,7 @@ FFMPEG_SRC="${SCRIPT_DIR}/deps/ffmpeg"
 mkdir -p "${BUILD_DIR}" "${PREFIX}"
 cd "${BUILD_DIR}"
 
-# 1. توليد ملف mbedtls.pc يدوياً ليتعرف عليه FFmpeg بنسبة 100%
+# 1. إعداد ملف mbedtls.pc لربط الأرشيفات الثابتة
 mkdir -p "${PREFIX}/lib/pkgconfig"
 cat << EOF > "${PREFIX}/lib/pkgconfig/mbedtls.pc"
 prefix=${PREFIX}
@@ -29,7 +29,8 @@ EOF
 
 export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
-SAFE_CFLAGS="${EXTRA_CFLAGS:-} -I${PREFIX}/include -fvisibility=default"
+# إضافة -fPIC إجبارية حتى يمكن دمج الـ .a داخل libmpv.so لاحقاً
+SAFE_CFLAGS="${EXTRA_CFLAGS:-} -I${PREFIX}/include -fPIC"
 SAFE_LDFLAGS="-Wl,-z,max-page-size=16384 -Wl,--gc-sections -L${PREFIX}/lib"
 
 FFMPEG_MINIMAL_FLAGS=(
@@ -45,10 +46,12 @@ FFMPEG_MINIMAL_FLAGS=(
   --strip=llvm-strip
   --prefix="${PREFIX}"
   --pkg-config=pkg-config
+  --pkg-config-flags="--static"
   --enable-version3
   --enable-mbedtls
-  --disable-static
-  --enable-shared
+  --enable-static
+  --disable-shared
+  --enable-pic
   --disable-everything
   --disable-doc
   --disable-programs
@@ -80,4 +83,4 @@ FFMPEG_MINIMAL_FLAGS=(
 
 make -j"$(nproc)"
 make install
-echo "==> Minimal FFmpeg installed successfully."
+echo "==> Minimal Static FFmpeg installed successfully."
