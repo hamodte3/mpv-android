@@ -20,11 +20,12 @@ JNI_FILES=$(find "${JNI_DIR}" -maxdepth 1 -type f \( -name "*.cpp" -o -name "*.c
   -ffunction-sections -fdata-sections \
   -Wl,--gc-sections -Wl,-s \
   -Wl,--icf=safe \
+  -Wl,--exclude-libs,ALL \
   -Wl,-z,max-page-size=16384 \
   -I"${PREFIX}/include" \
   -L"${PREFIX}/lib" \
   ${JNI_FILES} \
-  -lmpv -lavcodec -lavutil -landroid -llog -lOpenSLES -lEGL -lGLESv3 \
+  -lmpv -landroid -llog -lOpenSLES -lEGL -lGLESv3 \
   -o "${PREFIX}/lib/libplayer.so"
 
 echo "==> libplayer.so built successfully in ${PREFIX}/lib!"
