@@ -310,7 +310,7 @@ jobs:
           ninja -C "${ASS_BUILD}" -j$(nproc) install
           EOF
 
-          # 5. بناء MPV كـ Shared مدمج ذاتياً
+          # 5. بناء MPV كـ Shared مدمج ذاتياً (تم حذف -Dencoding=disabled)
           cat << 'EOF' > "$CORE_DIR/scripts/build_mpv.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -338,7 +338,6 @@ jobs:
             "-Db_lto=true"
             "-Dcplayer=false"
             "-Dlibmpv=true"
-            "-Dencoding=disabled"
             "-Degl-android=enabled"
             "-Dlua=disabled"
             "-Djavascript=disabled"
