@@ -93,7 +93,7 @@ jobs:
           fi
           EOF
 
-          # 2. سكربت بناء FFmpeg Static مدمج بالكامل لمنع الشاشة السوداء
+          # 2. سكربت بناء FFmpeg Static
           cat << 'EOF' > "$CORE_DIR/scripts/build_minimal_ffmpeg.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -310,7 +310,7 @@ jobs:
           ninja -C "${ASS_BUILD}" -j$(nproc) install
           EOF
 
-          # 5. بناء MPV كـ Shared مدمج ذاتياً (تم حذف -Dencoding=disabled)
+          # 5. بناء MPV مع تمرير ربط C++ الثابت لمنع خطأ to_chars
           cat << 'EOF' > "$CORE_DIR/scripts/build_mpv.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -334,6 +334,8 @@ jobs:
             "--libdir=lib"
             "--buildtype=release"
             "--default-library=shared"
+            "-Dc_link_args=['-static-libstdc++']"
+            "-Dcpp_link_args=['-static-libstdc++']"
             "-Doptimization=s"
             "-Db_lto=true"
             "-Dcplayer=false"
@@ -350,7 +352,7 @@ jobs:
           ninja -C "${BUILD_DIR}" -j$(nproc) install
           EOF
 
-          # 6. بناء جسر libplayer.so بربط C++ ثابت وبدون أي توابع ميتة
+          # 6. بناء جسر libplayer.so
           cat << 'EOF' > "$CORE_DIR/scripts/build_player.sh"
           #!/usr/bin/env bash
           set -euo pipefail
@@ -397,7 +399,6 @@ jobs:
           rm -rf "${BUILD_DIR}" "${PREFIX}"
           mkdir -p "${BUILD_DIR}" "${PREFIX}"
 
-          # ربط C++ الثابت في ملف التجميع لمنع __gxx_personality_v0 نهائياً
           cat << CROSS_EOF > "${BUILD_DIR}/android_cross.txt"
           [binaries]
           c = '${NDK_LLVM}/bin/${TARGET}-clang'
